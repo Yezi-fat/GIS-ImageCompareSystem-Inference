@@ -67,12 +67,14 @@ class LocalOnnxEngine:
         双输出格式适配（P-014）：
         - [1, C, H, W] 逐像素概率图（分割模型/伪模型）→ 直接取用；
         - [1, 4+C, anchors] 检测框（YOLO 系，如 yolo11）→ yolo_decode 栅格化为
-          [1+C, H, W] 概率图（通道 0=背景，通道 k=COCO 类别 k-1）；
-        解码后通道数与配置 class_ids 一致性校验（不一致说明模型与配置错配）。
+          [C+1, H, W] 概率图（通道 k=COCO 类别 k 序号直用，末位通道=背景残差）；
+        解码后通道数与有效类别表（配置 class_ids 或自动推导值）一致性校验
+        （不一致说明模型与配置错配）。
         """
         session = self._session("segmentation", model_name, model_version)
         input_name = session.get_inputs()[0].name
         seg_cfg = self._settings.models.segmentation
+        class_ids = self._store.effective_class_ids(model_name, model_version)
         results: list[np.ndarray] = []
         for tile in tiles:
             raw = session.run(None, {input_name: tile[np.newaxis, ...]})[0]
@@ -90,11 +92,11 @@ class LocalOnnxEngine:
                     f"模型输出维度不支持：ndim={raw.ndim}（支持逐像素概率图 [1,C,H,W] "
                     f"与检测框 [1,4+C,anchors] 两种格式）"
                 )
-            if seg_cfg.class_ids and prob.shape[0] != max(seg_cfg.class_ids) + 1:
+            if class_ids and prob.shape[0] != max(class_ids) + 1:
                 raise InferenceFailedError(
-                    f"模型输出通道数 {prob.shape[0]} 与配置 class_ids（max={max(seg_cfg.class_ids)}，"
-                    f"期望通道数 {max(seg_cfg.class_ids) + 1}）不一致——"
-                    f"模型与 MODELS__SEGMENTATION__CLASS_IDS 配置错配"
+                    f"模型输出通道数 {prob.shape[0]} 与有效类别表（max={max(class_ids)}，"
+                    f"期望通道数 {max(class_ids) + 1}）不一致——"
+                    f"模型与 MODELS__SEGMENTATION__CLASS_IDS 配置或 ONNX 元数据 names 错配"
                 )
             results.append(prob)
         return results
@@ -128,5 +130,5 @@ class LocalOnnxEngine:
         name, version = self._store.resolve_version(model_name, model_version, model_type)
         class_ids = None
         if model_type == "segmentation":
-            class_ids = list(self._settings.models.segmentation.class_ids)
+            class_ids = self._store.effective_class_ids(name, version)
         return ModelInfo(name=name, version=version, provider=self._actual_provider, class_ids=class_ids)

@@ -43,10 +43,11 @@ def health() -> InferHealthResponse:
 def _model_health(loaded: dict, model_type: str) -> ModelHealth:
     """从会话缓存键 (model_type, name, version, provider) 汇总模型就绪状态。"""
     entries = [k for k in loaded if k[0] == model_type]
+    class_ids = None
+    if model_type == "segmentation":
+        # 有效类别表：显式配置优先，缺省时从 ONNX names 自动推导（Q2-P2）
+        class_ids = registry.model_store().effective_class_ids()
     if not entries:
-        return ModelHealth(loaded=False, version=None, provider=None, class_ids=None)
+        return ModelHealth(loaded=False, version=None, provider=None, class_ids=class_ids)
     _, _, version, provider = entries[-1]
-    class_ids = (
-        list(settings.models.segmentation.class_ids) if model_type == "segmentation" else None
-    )
     return ModelHealth(loaded=True, version=version, provider=provider, class_ids=class_ids)

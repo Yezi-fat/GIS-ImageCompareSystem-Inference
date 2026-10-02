@@ -59,6 +59,10 @@ def _make_segmentation() -> onnx.ModelProto:
     )
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
     model.ir_version = 8
+    # 内嵌类别名称表（Q2-P2：class_ids 缺省时从 names 自动推导；4 维输出 → [0..4]）
+    meta = model.metadata_props.add()
+    meta.key = "names"
+    meta.value = str({0: "background", 1: "forest", 2: "grassland", 3: "snow", 4: "building"})
     return model
 
 

@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.0 |
-| 编写日期 | 2026-09-12；V2.0 修订 2026-09-21（保姆级步骤细化，配置/编排范例独立成 `deploy/` 文件） |
+| 文档版本 | V2.1 |
+| 编写日期 | 2026-09-12；V2.0 修订 2026-09-21（保姆级步骤细化，配置/编排范例独立成 `deploy/` 文件）；V2.1 修订 2026-10-02 |
 | 适用范围 | 影像地图比对系统 Python 推理计算服务群（infer-service / compute-service / nlp-service）内网部署 |
 | 前置阅读 | 《Python推理计算服务接口文档.md》（契约）、《模型交付流水线.md》（模型放置规范） |
 | 部署基线 | 需求 V2.8 / 设计 V2.6 / 清单 V2.6；M1~M5 全部完成，首轮 Java 全链路联调已通过 |
@@ -13,6 +13,7 @@
 
 | 版本 | 日期 | 修订 |
 | --- | --- | --- |
+| V2.1 | 2026-10-02 | §9.1 新增 provider 生效链路说明（GPU 三要件、取值校验、自助核验，bug-2026-09-28 Q1）；§8 补 `/infer/models` 模型发现校验方式 |
 | V2.0 | 2026-09-21 | 全文细化为保姆级步骤；配置范例独立为 `deploy/.env.example`；生产编排独立为 `deploy/docker-compose.prod.yml`；新增 §2 模型目录规划与放置命令、§7 模型版本新增/切换流程、§9 逐步验证命令 |
 
 ---
@@ -311,6 +312,8 @@ sudo chmod -R a+rX /data/models
 
 # ② 校验
 docker exec python-infer-service ls /models/landcover-seg/v2.1
+# ③ 模型发现接口核对（双产物/类别表/默认版本一览，V1.1 新增）
+curl -s -H "X-Internal-Token: $INTERNAL_TOKEN" http://localhost:8001/infer/models | python3 -m json.tool
 ```
 
 **切换激活版本**：Java 侧 `PUT /api/v1/models/active` 热生效（默认版本随请求下发；缺省版本由 `.env` 的 `MODELS__*__VERSION` 兜底）。
@@ -326,6 +329,30 @@ docker exec python-infer-service ls /models/landcover-seg/v2.1
 4. 验证：`curl -s http://localhost:8001/health` 中 `gpu_available=true` 且 `gpu_usable=true`（后者为试建会话实测口径，`false` 时查 §11 排坑表）。
 
 GPU 会话失败会自动熔断回退 CPU 并在响应 `actual_provider=local-cpu` 如实标记（FR-5.6），服务不中断。
+
+### 9.1 provider 生效链路（★ 改配置不生效时必读，bug-2026-09-28 Q1）
+
+「切换推理提供方」涉及两侧配置，只改一处不会端到端生效：
+
+```
+Java 运行配置（判定方，FR-5.6）          Python infer-service（执行方）
+inference.provider ──提示头──► X-Inference-Provider ──► registry 按提示选引擎
+（PUT /api/v1/config/inference，热生效）   缺省时兜底：SERVICE__DEFAULT_PROVIDER（重启生效）
+```
+
+- **正常路径 Java 必带提示头**——Python 的 `SERVICE__DEFAULT_PROVIDER` 仅在提示头缺省
+  （如远程熔断回放本地）时兜底。端到端切换 GPU 的入口是 **Java 侧运行配置**，Python 配置作兜底保留；
+- **GPU 生效三要件**（缺一不可，缺一即静默兜底 local-cpu 并记 WARN 日志
+  `gpu_unavailable_fallback_cpu`）：
+  ① GPU 镜像 `map-change-infer:gpu`（CPU 镜像内无 onnxruntime-gpu，改配置无效）；
+  ② 宿主机 NVIDIA 驱动 + nvidia-container-toolkit + compose GPU 预留段；
+  ③ Java 侧提供方配置切换（或提示头缺省时 Python 兜底配置为 local-gpu）；
+- **取值形式**：只认小写连字符 `remote` / `local-gpu` / `local-cpu`；`local_gpu` 等下划线形式
+  在 Python 侧启动即拒绝（配置）/ 返回 400（提示头），不再静默兜底（V1.1 行为变更）；
+- **自助核验**：`curl -s http://localhost:8001/health` 看 `gpu_available`（provider 列表存在）
+  与 `gpu_usable`（试建会话通过）；推理响应/任务详情的 `actual_provider` 为实际执行口径；
+- **常见误判**：前端显示 LOCAL_CPU + 任务中 CPU 占用高 = 实际就在 CPU 上跑（上述三要件未齐），
+  并非配置未加载。
 
 ---
 
@@ -364,6 +391,7 @@ Java 自动重签重试一次，无需人工干预。
 
 | 问题 | 处置 |
 | --- | --- |
+| 改 `SERVICE__DEFAULT_PROVIDER` 为 local_gpu 不生效 | 三层核查（§9.1）：① 下划线形式非法（须 `local-gpu`，V1.1 起启动即拒）；② 运行的是 CPU 镜像（须换 GPU 镜像）；③ Java 提示头覆盖 Python 兜底（端到端切换走 Java 运行配置） |
 | docker.io 拉取基础镜像超时 | 经内网镜像仓库/加速器拉取后本地 tag（联调实测 `docker.m.daocloud.io` 可用）；GPU 基础镜像 `nvidia/cuda:12.4.1-runtime-ubuntu22.04` 同法 |
 | GPU 镜像 python 版本 | ubuntu22.04 默认 python3=3.10，本仓库 Dockerfile.gpu 已用 `python3.11 -m venv` 引导（ensurepip 被 Debian 禁用）；勿改回 apt python3-pip |
 | onnxruntime CPU/GPU 冲突 | 两包同 namespace 互斥；GPU 镜像已按「先卸 CPU 版再装 GPU 版」处理 |

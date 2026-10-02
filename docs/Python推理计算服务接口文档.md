@@ -2,10 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.0 |
+| 文档版本 | V1.1 |
 | 编写日期 | 2026-09-12 |
 | 适用范围 | Python 推理计算服务群（infer-service / compute-service / nlp-service），**仅内网**，供 Java 业务服务群（analysis-service / result-service）调用 |
 | 依据 | 详细设计文档 V2.6、需求分析文档 V2.8、docs/openapi/ 快照；本文全部示例经运行中服务实测（伪模型 v0.0-fake 链路） |
+| V1.1 修订 | §1.4 新增 `GET /infer/models` 模型发现接口（bug-2026-09-28 Q2/Q3）；§0.2 `X-Inference-Provider` 非法取值行为明确为 400 INVALID_INPUT（原静默兜底） |
 
 ## 0. 通用约定
 
@@ -24,7 +25,7 @@
 | 请求头 | 必选 | 说明 |
 | --- | --- | --- |
 | `X-Internal-Token` | 鉴权开启时 | 与 Java 共享密钥（同一 `INTERNAL_TOKEN` 环境变量注入）；`AUTH_ENABLED=false` 时免带；`/health` 恒豁免（FR-10.7） |
-| `X-Inference-Provider` | 仅 `/infer/*` 可选 | 推理提供方提示：`remote` / `local-gpu` / `local-cpu`；缺省时按 infer-service 本地默认配置兜底；实际执行不一致时响应 `actual_provider` 如实标记 |
+| `X-Inference-Provider` | 仅 `/infer/*` 可选 | 推理提供方提示：`remote` / `local-gpu` / `local-cpu`（小写连字符）；缺省时按 infer-service 本地默认配置兜底；实际执行不一致时响应 `actual_provider` 如实标记。**非法取值（如 `local_gpu` 下划线形式）返回 400 INVALID_INPUT，不静默兜底**（V1.1，bug-2026-09-28 Q1） |
 | `X-Task-Id` / `X-Trace-Id` | 建议 | 透传进结构化日志（全链路追踪，需求 8.4） |
 
 ### 0.3 数据约定
@@ -196,6 +197,51 @@ curl -X POST http://infer-service:8001/infer/change-detection \
     "change_detect": {"loaded": true, "version": "v0.0-fake", "provider": "local-cpu", "class_ids": null}
   },
   "remote_configured": false
+}
+```
+
+> V1.1：`models.segmentation.class_ids` 的来源——显式配置 `MODELS__SEGMENTATION__CLASS_IDS` 优先；
+> 缺省时从模型 ONNX 元数据 names 自动推导（检测模型类别序号直用、末位通道为背景）；
+> 模型未内嵌 names 时为 null。
+
+### 1.4 模型发现（V1.1 新增）
+
+| 项目 | 内容 |
+| --- | --- |
+| 方法与路径 | `GET /infer/models` |
+| 对应事项 | bug-2026-09-28 Function-Q2（要素目录与模型类别核对）/ Function-Q3（Java 模型列表对账） |
+
+**功能说明**：扫描模型目录（`{name}/{version}/{fp32,int8}.onnx`），返回推理服务实际可用模型清单——双产物齐全性、类别表（读 ONNX 元数据 names，索引=类别 ID）、概率图通道数、会话加载状态、是否当前默认版本。供 Java 模型管理页展示/对账、element_catalog 的 `model_class_id` 映射校验。只读接口，鉴权同其他接口（/health 豁免口径不含本接口）。
+
+**响应参数**（200）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| models_dir | string | 模型目录（`MODELS__DIR` 实值） |
+| models | array | 模型列表（按名聚合）：`{name, versions[]}` |
+| models[].versions[].version | string | 版本号（目录名） |
+| models[].versions[].fp32 / int8 | bool | 对应产物文件是否存在 |
+| models[].versions[].class_labels | string[]\|null | 类别名称表（ONNX names，索引=类别 ID）；未内嵌为 null |
+| models[].versions[].class_count | int\|null | 概率图通道数：检测模型（YOLO 系）= len(labels)+1（末位背景）；逐像素分割模型 = len(labels) |
+| models[].versions[].loaded | bool | 会话是否已加载常驻 |
+| models[].versions[].default_for | string[] | 作为默认版本的模型类型（`segmentation` / `change_detection`），非默认为空数组 |
+
+**实测响应**（开发机 models/ 目录实测，含 EuroSAT 真实模型）：
+
+```json
+{
+  "models_dir": "models",
+  "models": [
+    {"name": "landcover-seg", "versions": [
+      {"version": "v0.0-fake", "fp32": true, "int8": true,
+       "class_labels": ["background", "forest", "grassland", "snow", "building"],
+       "class_count": 5, "loaded": false, "default_for": ["segmentation"]}]},
+    {"name": "landcover-yolo-v11", "versions": [
+      {"version": "v1.0", "fp32": true, "int8": true,
+       "class_labels": ["AnnualCrop", "Forest", "HerbaceousVegetation", "Highway", "Industrial",
+                        "Pasture", "PermanentCrop", "Residential", "River", "Sealake"],
+       "class_count": 11, "loaded": false, "default_for": []}]}
+  ]
 }
 ```
 

@@ -119,6 +119,25 @@
         }
       }
     },
+    "/infer/models": {
+      "get": {
+        "summary": "List Models",
+        "description": "模型发现（bug-2026-09-28 Q2/Q3）：扫描模型目录，上报双产物齐全性、\n类别表（ONNX 元数据 names）、加载状态与默认版本——供 Java 模型管理页\n展示/对账与 element_catalog 映射校验。",
+        "operationId": "list_models_infer_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",
@@ -457,6 +476,29 @@
         "title": "InferModelsHealth",
         "description": "infer-service 两类模型就绪状态。"
       },
+      "ModelEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "模型名（目录名），如 landcover-seg"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelVersionInfo"
+            },
+            "type": "array",
+            "title": "Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "versions"
+        ],
+        "title": "ModelEntry",
+        "description": "单模型（按名聚合各版本）。"
+      },
       "ModelHealth": {
         "properties": {
           "loaded": {
@@ -556,6 +598,97 @@
         ],
         "title": "ModelInfo",
         "description": "模型信息（FR-3.3：任务记录 provider + 模型名 + 版本）。\n\nengines 的 info() 返回本模型；健康检查与分析响应复用。"
+      },
+      "ModelVersionInfo": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "版本号（目录名）"
+          },
+          "fp32": {
+            "type": "boolean",
+            "title": "Fp32",
+            "description": "fp32.onnx 产物是否存在（GPU 路径必需）"
+          },
+          "int8": {
+            "type": "boolean",
+            "title": "Int8",
+            "description": "int8.onnx 产物是否存在（CPU 路径必需）"
+          },
+          "class_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Labels",
+            "description": "类别名称表（ONNX 元数据 names，列表索引=类别 ID）；模型未内嵌 names 时为 null"
+          },
+          "class_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Count",
+            "description": "概率图通道数：检测模型（YOLO 系）= len(class_labels)+1（末位为背景通道）；逐像素分割模型 = len(class_labels)；无 names 时为 null"
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded",
+            "description": "会话是否已加载常驻（ModelStore 缓存命中）"
+          },
+          "default_for": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Default For",
+            "description": "该版本作为默认版本的模型类型：segmentation / change_detection（可兼得，通常至多其一）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "fp32",
+          "int8",
+          "loaded"
+        ],
+        "title": "ModelVersionInfo",
+        "description": "单模型单版本的发现信息。"
+      },
+      "ModelsResponse": {
+        "properties": {
+          "models_dir": {
+            "type": "string",
+            "title": "Models Dir",
+            "description": "模型目录（MODELS__DIR 实值）"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelEntry"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models_dir",
+          "models"
+        ],
+        "title": "ModelsResponse",
+        "description": "GET /infer/models 响应。"
       },
       "SegmentationRequest": {
         "properties": {

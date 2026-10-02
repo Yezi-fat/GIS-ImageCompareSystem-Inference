@@ -89,7 +89,7 @@ class RemoteEngine:
             name=name,
             version=version,
             provider="remote",
-            class_ids=list(self._settings.models.segmentation.class_ids),
+            class_ids=self._configured_class_ids(),
         )
 
     @property
@@ -98,14 +98,15 @@ class RemoteEngine:
 
     def info_for(self, model_type: str, model_name: str | None, model_version: str | None) -> ModelInfo:
         name, version = self._resolve(model_type, model_name, model_version)
-        class_ids = (
-            list(self._settings.models.segmentation.class_ids)
-            if model_type == "segmentation"
-            else None
-        )
+        class_ids = self._configured_class_ids() if model_type == "segmentation" else None
         return ModelInfo(name=name, version=version, provider="remote", class_ids=class_ids)
 
     # ---- 内部实现 ----
+
+    def _configured_class_ids(self) -> list[int] | None:
+        """远程路径的类别表：仅取显式配置（远端模型文件不可读，无法自动推导）。"""
+        configured = self._settings.models.segmentation.class_ids
+        return list(configured) if configured else None
 
     def _resolve(self, model_type: str, model_name: str | None, model_version: str | None) -> tuple[str, str]:
         default = getattr(self._settings.models, model_type)

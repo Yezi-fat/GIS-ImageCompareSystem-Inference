@@ -26,6 +26,7 @@ class ModelStore:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._cache: dict[tuple[str, str, str, str], Any] = {}
+        self._derived_class_ids: dict[tuple[str, str], list[int] | None] = {}
         self._lock = threading.Lock()
 
     def resolve_version(
@@ -37,6 +38,45 @@ class ModelStore:
         """解析请求（可空）名/版本 → 实际 (name, version)；缺省用 L1 配置默认版本。"""
         default = getattr(self._settings.models, model_type)
         return model_name or default.name, model_version or default.version
+
+    def effective_class_ids(
+        self,
+        model_name: str | None = None,
+        model_version: str | None = None,
+    ) -> list[int] | None:
+        """分割模型有效类别表（Q2-P2）：显式配置优先；缺省时从 ONNX names 自动推导。
+
+        推导规则（discovery.read_model_metadata）：检测模型（3 维输出）类别序号直用、
+        末位通道为背景 → [0..len(names)]；逐像素分割模型（4 维输出）→ [0..len(names)-1]；
+        模型未内嵌 names 或文件缺失 → None（不做模型侧类别约束，FR-6.6 仅校验映射表）。
+        推导结果按 (name, version) 进程内缓存。
+        """
+        configured = self._settings.models.segmentation.class_ids
+        if configured:
+            return list(configured)
+        name, version = self.resolve_version(model_name, model_version, "segmentation")
+        key = (name, version)
+        if key not in self._derived_class_ids:
+            self._derived_class_ids[key] = self._derive_class_ids(name, version)
+        derived = self._derived_class_ids[key]
+        return list(derived) if derived else None
+
+    def _derive_class_ids(self, name: str, version: str) -> list[int] | None:
+        """从模型文件元数据推导类别表（见 effective_class_ids 规则）。"""
+        from infer_service.engines.discovery import read_model_metadata
+
+        seg_cfg = self._settings.models.segmentation
+        base = os.path.join(self._settings.models.dir, name, version)
+        path = os.path.join(base, seg_cfg.fp32)
+        if not os.path.isfile(path):
+            path = os.path.join(base, seg_cfg.int8)
+        if not os.path.isfile(path):
+            return None
+        labels, output_ndim = read_model_metadata(path)
+        if not labels:
+            return None
+        count = len(labels) + 1 if output_ndim == 3 else len(labels)
+        return list(range(count))
 
     def get_session(
         self,
