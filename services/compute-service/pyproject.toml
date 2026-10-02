@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compute-service"
+version = "0.1.0"
+description = "计算服务：/compute/diff、/compute/vectorize；差异三态计算、矢量化、Geod 面积、蒙版分色（纯 CPU，轻量）"
+requires-python = ">=3.11"
+dependencies = [
+    "cv-common",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic-settings>=2.2",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "shapely>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

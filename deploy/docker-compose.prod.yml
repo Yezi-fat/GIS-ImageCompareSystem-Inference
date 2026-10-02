@@ -1,0 +1,85 @@
+# ============================================================================
+# Python 推理计算服务群 生产/联调部署编排（形态 A：与 Java 同网络）
+# ----------------------------------------------------------------------------
+# 使用方法（在仓库根目录执行，.env 已按 deploy/.env.example 备好）：
+#   docker compose --project-directory . -f deploy/docker-compose.prod.yml up -d
+#
+# 注意：--project-directory . 不可省略——compose 的 env_file 与相对路径按
+# 「项目目录」解析，缺省为 compose 文件所在目录（deploy/），会找不到根目录 .env。
+#
+# 与仓库根目录 docker-compose.yml（开发联调版）的区别：
+#   - 不 build，直接使用已构建好的镜像（构建见部署文档 §3）；
+#   - 模型目录挂载宿主机 /data/models（只读），由运维按部署文档 §2 放置；
+#   - 含 restart: unless-stopped。
+#
+# 前置条件：Java 侧 compose 已创建外部网络 mapchange_default
+#   （验证：docker network ls | grep mapchange_default）
+# ============================================================================
+services:
+  infer-service:
+    image: gis-imagecomparesystem-inference-infer-service:latest
+    container_name: python-infer-service
+    ports:
+      - "8001:8001"                # 宿主机暴露供运维直测；纯内网可按需删除
+    volumes:
+      # 模型目录：宿主机 /data/models → 容器 /models（只读）
+      # 放置规范见部署文档 §2（{name}/{version}/{fp32,int8}.onnx）
+      - /data/models:/models:ro
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [infer-service]   # Java analysis-service 默认直连地址
+    restart: unless-stopped
+
+  compute-service:
+    image: gis-imagecomparesystem-inference-compute-service:latest
+    container_name: python-compute-service
+    ports:
+      - "8002:8002"
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [compute-service]
+    restart: unless-stopped
+
+  nlp-service:
+    image: gis-imagecomparesystem-inference-nlp-service:latest
+    container_name: python-nlp-service
+    ports:
+      - "8003:8003"
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [nlp-service]
+    restart: unless-stopped
+
+networks:
+  mapchange:
+    external: true                 # Java compose 已创建的网络
+    name: mapchange_default
+
+# ----------------------------------------------------------------------------
+# 形态 B（独立宿主机/独立网络，Java 经 PYTHON_*_HOST/PORT 指向本机）：
+#   删除上方 networks 段（services 内的与文件底部的），保留 ports 映射即可。
+#
+# GPU 版：将 infer-service 替换为（镜像构建见部署文档 §3.2）：
+#   infer-service:
+#     image: map-change-infer:gpu
+#     container_name: python-infer-service
+#     ports: ["8001:8001"]
+#     volumes: ["/data/models:/models:ro"]
+#     env_file: .env
+#     environment:
+#       SERVICE__DEFAULT_PROVIDER: local-gpu
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     networks:
+#       mapchange:
+#         aliases: [infer-service]
+#     restart: unless-stopped
+# ----------------------------------------------------------------------------

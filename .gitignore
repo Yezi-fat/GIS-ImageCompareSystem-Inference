@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# 模型二进制（ONNX 大文件，经模型交付流水线分发，不入库）
+models/**/*.onnx
+
+# 本地部署实例与密钥（模板 .env.example 入库）
+deploy/.env
+.env
+
+# 本地工具配置
+.claude/settings.local.json
+.vscode/
+
+# 训练产物
+train/runs/
+*.pt

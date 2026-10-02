@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infer-service"
+version = "0.1.0"
+description = "推理服务：/infer/segmentation、/infer/change-detection；推理引擎（本地 GPU/CPU、远程）、Tile 管线、模型管理、环境能力上报"
+requires-python = ">=3.11"
+dependencies = [
+    "cv-common",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic-settings>=2.2",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "rasterio>=1.3",
+    "onnxruntime>=1.18",
+]
+
+[project.optional-dependencies]
+# GPU 版镜像（Dockerfile.gpu，P-028 完善）
+gpu = [
+    "onnxruntime-gpu>=1.18",
+    "pynvml>=11.5",
+]
+# 伪模型制作脚本（scripts/make_fake_models.py）与测试
+dev = [
+    "onnx>=1.16",
+    "pytest>=8.0",
+    "respx>=0.22",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,755 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "infer-service",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/infer/segmentation": {
+      "post": {
+        "summary": "Segmentation",
+        "description": "要素识别（语义分割，FR-6）：loader→tiler→engine→融合→后处理→着色→统计。",
+        "operationId": "segmentation_infer_segmentation_post",
+        "parameters": [
+          {
+            "name": "x-inference-provider",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Inference-Provider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/change-detection": {
+      "post": {
+        "summary": "Change Detection",
+        "description": "端到端变化检测（FR-1）：配准校验（§3.2.5）→ 双时相推理 → 阈值二值化 → 后处理。",
+        "operationId": "change_detection_infer_change_detection_post",
+        "parameters": [
+          {
+            "name": "x-inference-provider",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Inference-Provider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDetectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeMaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "健康与能力上报（FR-5.5/5.7）。",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChangeDetectRequest": {
+        "properties": {
+          "before_url": {
+            "type": "string",
+            "title": "Before Url",
+            "description": "旧期影像：Java 签发的内网预签名 URL"
+          },
+          "after_url": {
+            "type": "string",
+            "title": "After Url",
+            "description": "新期影像：Java 签发的内网预签名 URL"
+          },
+          "geo_extent": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Geo Extent",
+            "description": "[minx,miny,maxx,maxy]，CGCS2000 经纬度，必填（评审 D-01），语义同 §4.1"
+          },
+          "threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "description": "变化概率二值化阈值（FR-1.5）",
+            "default": 0.5
+          },
+          "min_area": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Area",
+            "description": "最小变化区域面积（像素，FR-1.6）",
+            "default": 100
+          },
+          "auto_align": {
+            "type": "boolean",
+            "title": "Auto Align",
+            "description": "自动配准开关（FR-1.2）：本期仅透传记录、不改流程；偏差校验恒执行，超阈值返回 ALIGNMENT_FAILED（§3.2.5，评审 D-03）",
+            "default": false
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "description": "缺省用默认版本（FR-3.5）"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "before_url",
+          "after_url",
+          "geo_extent"
+        ],
+        "title": "ChangeDetectRequest",
+        "description": "端到端变化检测请求（设计 §4.2）。"
+      },
+      "ChangeMaskResponse": {
+        "properties": {
+          "mask_png_b64": {
+            "type": "string",
+            "title": "Mask Png B64",
+            "description": "变化蒙版 PNG base64（与输入同尺寸，FR-1.4）"
+          },
+          "probmap_png_b64": {
+            "type": "string",
+            "title": "Probmap Png B64",
+            "description": "变化概率图 PNG base64（FR-1.5，前端按阈值动态调整）"
+          },
+          "statistics": {
+            "$ref": "#/components/schemas/ChangeStatistics"
+          },
+          "estimated_shift_px": {
+            "type": "number",
+            "title": "Estimated Shift Px",
+            "description": "配准校验实测整体平移量（像素，§3.2.5，评审 D-03）"
+          },
+          "auto_aligned": {
+            "type": "boolean",
+            "title": "Auto Aligned",
+            "description": "本期恒为 false——自动配准列 M6（评审 D-03）",
+            "default": false
+          },
+          "geo_transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geo Transform",
+            "description": "GDAL 六参数仿射变换；Java 透传给 compute 侧 vectorize"
+          },
+          "model_info": {
+            "$ref": "#/components/schemas/ModelInfo",
+            "description": "实际使用的模型名/版本/provider（FR-3.3）"
+          },
+          "actual_provider": {
+            "type": "string",
+            "title": "Actual Provider",
+            "description": "实际执行提供方（降级时如实标记）"
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Elapsed Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mask_png_b64",
+          "probmap_png_b64",
+          "statistics",
+          "estimated_shift_px",
+          "model_info",
+          "actual_provider",
+          "elapsed_ms"
+        ],
+        "title": "ChangeMaskResponse",
+        "description": "端到端变化检测响应（设计 §4.2）。"
+      },
+      "ChangeStatistics": {
+        "properties": {
+          "change_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Change Count",
+            "description": "变化区域数量"
+          },
+          "total_area_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Area Px",
+            "description": "变化总面积（像素）"
+          },
+          "total_area_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Area M2",
+            "description": "变化总面积（平方米，CGCS2000 椭球）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "change_count"
+        ],
+        "title": "ChangeStatistics",
+        "description": "变化统计（FR-1.8）。"
+      },
+      "ClassStatistics": {
+        "properties": {
+          "area_px": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Area Px",
+            "description": "覆盖面积（像素数）"
+          },
+          "area_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area M2",
+            "description": "地理面积（平方米，CGCS2000 椭球大地测量）"
+          },
+          "ratio": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ratio",
+            "description": "占影像比例"
+          },
+          "patch_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Patch Count",
+            "description": "斑块数量"
+          }
+        },
+        "type": "object",
+        "required": [
+          "area_px",
+          "ratio",
+          "patch_count"
+        ],
+        "title": "ClassStatistics",
+        "description": "单类要素统计（FR-6.5，双单位口径：area_px + area_m2，需求 V1.6）。"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InferHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "ok / degraded / error"
+          },
+          "gpu_available": {
+            "type": "boolean",
+            "title": "Gpu Available",
+            "description": "CUDA 可用性探测（onnxruntime providers + 试建小会话）"
+          },
+          "gpu_usable": {
+            "type": "boolean",
+            "title": "Gpu Usable",
+            "description": "GPU 实际可用（显存满足模型要求）"
+          },
+          "vram_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Mb",
+            "description": "显存容量（pynvml，GPU 版镜像）"
+          },
+          "cpu_cores": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Cpu Cores"
+          },
+          "models": {
+            "$ref": "#/components/schemas/InferModelsHealth"
+          },
+          "remote_configured": {
+            "type": "boolean",
+            "title": "Remote Configured",
+            "description": "是否配置了远程推理端点（未配置属正常形态，FR-5.6）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "gpu_available",
+          "gpu_usable",
+          "cpu_cores",
+          "models",
+          "remote_configured"
+        ],
+        "title": "InferHealthResponse",
+        "description": "infer-service /health（设计 §3.5）——Java 三级解析（FR-5.6/5.7）数据源。"
+      },
+      "InferModelsHealth": {
+        "properties": {
+          "segmentation": {
+            "$ref": "#/components/schemas/ModelHealth"
+          },
+          "change_detect": {
+            "$ref": "#/components/schemas/ModelHealth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "segmentation",
+          "change_detect"
+        ],
+        "title": "InferModelsHealth",
+        "description": "infer-service 两类模型就绪状态。"
+      },
+      "ModelHealth": {
+        "properties": {
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded",
+            "description": "会话是否已加载常驻"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "class_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Ids",
+            "description": "仅分割模型上报"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loaded"
+        ],
+        "title": "ModelHealth",
+        "description": "单模型就绪状态（FR-5.5）。"
+      },
+      "ModelInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "模型名，如 landcover-seg"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "模型版本，如 v2.0"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "remote / local-gpu / local-cpu"
+          },
+          "class_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Ids",
+            "description": "分割模型支持的输出类别 ID 列表"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "ModelInfo",
+        "description": "模型信息（FR-3.3：任务记录 provider + 模型名 + 版本）。\n\nengines 的 info() 返回本模型；健康检查与分析响应复用。"
+      },
+      "SegmentationRequest": {
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "description": "Java 签发的对象存储内网预签名 URL（评审 P-03）"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "description": "缺省用默认版本（FR-3.5 切换链路，评审 P-02）"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version",
+            "description": "缺省用默认版本"
+          },
+          "elements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Elements",
+            "description": "要素类别 ID 列表（多选，FR-6.1）"
+          },
+          "class_mapping": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Class Mapping",
+            "description": "要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）"
+          },
+          "colors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Colors",
+            "description": "要素类别 ID → 叠加颜色（#RRGGBB，Java 自 element_catalog 下发）"
+          },
+          "min_area": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Area",
+            "description": "最小斑块面积（像素，FR-1.6/6.5）",
+            "default": 100
+          },
+          "geo_extent": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Geo Extent",
+            "description": "[minx,miny,maxx,maxy]，CGCS2000 经纬度，必填（评审 D-01）：无内嵌 transform 的影像据此推导 geo_transform，GeoTIFF 场景用于交叉校验"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_url",
+          "elements",
+          "class_mapping",
+          "colors",
+          "geo_extent"
+        ],
+        "title": "SegmentationRequest",
+        "description": "要素识别请求（设计 §4.1）。\n\n业务策略参数（类别映射/配色/min_area）由 Java 运行配置持有、逐请求下发（FR-10）。"
+      },
+      "SegmentationResponse": {
+        "properties": {
+          "combined_mask_png_b64": {
+            "type": "string",
+            "title": "Combined Mask Png B64",
+            "description": "按类别着色的合成蒙版 PNG（RGBA，非覆盖区域透明，FR-6.3）base64"
+          },
+          "per_class_masks": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Per Class Masks",
+            "description": "各类别独立二值蒙版 base64（前端按类别开关图层，FR-6.3）"
+          },
+          "statistics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClassStatistics"
+            },
+            "type": "object",
+            "title": "Statistics",
+            "description": "按要素类别键控的统计"
+          },
+          "geo_transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geo Transform",
+            "description": "GDAL 六参数仿射变换 [x0,px_w,0,y0,0,-px_h]；Java 透传给 compute 侧 diff/vectorize"
+          },
+          "model_info": {
+            "$ref": "#/components/schemas/ModelInfo",
+            "description": "实际使用的模型名/版本/provider/类别表（FR-3.3）"
+          },
+          "actual_provider": {
+            "type": "string",
+            "title": "Actual Provider",
+            "description": "实际执行提供方（与请求不一致时如实标记，降级场景）"
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "description": "端到端耗时（毫秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "combined_mask_png_b64",
+          "per_class_masks",
+          "statistics",
+          "model_info",
+          "actual_provider",
+          "elapsed_ms"
+        ],
+        "title": "SegmentationResponse",
+        "description": "要素识别响应（设计 §4.1）。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+# Python 推理计算服务群编排（设计 §7.2）：三服务 + 模型卷（供 Java 侧联调）
+#
+# 运行约束：
+# - 三服务仅内网可达，不暴露公网端口、不接入 Nacos（Java 侧配置地址直连，约束 #9）；
+# - AUTH_ENABLED / INTERNAL_TOKEN 必须与 Java 侧同一环境变量注入（FR-10.7/J-10），
+#   否则会出现 Java 已鉴权但 Python 拒绝（或反之）的不一致状态。
+#
+# 联调部署（2026-09-12）：加入 Java 侧 mapchange_default 外部网络并注册别名
+# infer-service/compute-service/nlp-service——与 Java analysis-service 默认
+# 地址 http://infer-service:8001 / http://compute-service:8002 / http://nlp-service:8003
+# 对齐（替换原 wiremock 桩容器）。
+services:
+  infer-service:
+    build:
+      context: .
+      dockerfile: services/infer-service/Dockerfile
+    # GPU 版：dockerfile 换 services/infer-service/Dockerfile.gpu，
+    # 并加 deploy.resources 挂 NVIDIA Container Toolkit（设计 §7.1）
+    container_name: python-infer-service
+    ports:
+      - "8001:8001"
+    extra_hosts:
+      # 开发联调：容器内经 host.docker.internal 访问宿主机供图/存储（Linux 需显式映射）
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 开发联调：挂载仓库内模型目录（含伪模型 v0.0-fake）；
+      # 生产：改为命名卷/共享卷，模型经对象存储下发（J-05）
+      - ./services/infer-service/models:/models:ro
+    environment:
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      MODELS__DIR: /models
+      MODELS__SEGMENTATION__VERSION: ${MODELS__SEGMENTATION__VERSION:-v0.0-fake}
+      MODELS__CHANGE_DETECTION__VERSION: ${MODELS__CHANGE_DETECTION__VERSION:-v0.0-fake}
+    networks:
+      default: {}
+      mapchange:
+        aliases: [infer-service]   # Java analysis-service 默认直连地址（内部契约）
+
+  compute-service:
+    build:
+      context: .
+      dockerfile: services/compute-service/Dockerfile
+    container_name: python-compute-service
+    ports:
+      - "8002:8002"
+    environment:
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+    networks:
+      default: {}
+      mapchange:
+        aliases: [compute-service]
+
+  nlp-service:
+    build:
+      context: .
+      dockerfile: services/nlp-service/Dockerfile
+    container_name: python-nlp-service
+    ports:
+      - "8003:8003"
+    environment:
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      # NLP__LLM_URL: ""            # 完整 chat completions 端点（约束 #10）
+      # NLP__GEOCODER_URL: ""       # 完整地理编码端点
+    networks:
+      default: {}
+      mapchange:
+        aliases: [nlp-service]
+
+networks:
+  mapchange:
+    # Java 微服务群所在网络（外部已有，Java 侧 docker compose 创建）
+    external: true
+    name: mapchange_default

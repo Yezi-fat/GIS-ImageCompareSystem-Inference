@@ -1,0 +1,463 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "nlp-service",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/nlp/parse": {
+      "post": {
+        "summary": "Nlp Parse",
+        "description": "自然语言任务解析（FR-9，只解析不执行；need_confirm 恒为 true，FR-9.4）。",
+        "operationId": "nlp_parse_nlp_parse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NlParseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NlParseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "NLU / 地理编码可用性 + 熔断器状态上报（FR-9.7）。",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NlpHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ElementCatalogItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "要素类别 ID，如 forest"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "显示名，如 森林"
+          },
+          "model_class_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Class Id",
+            "description": "对应分割模型输出类别 ID"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "启用状态",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ElementCatalogItem",
+        "description": "要素目录条目（Java 自 config-service element_catalog 下发，J-06/D-02）。"
+      },
+      "GeocoderHealth": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "amap / baidu / nominatim"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "available"
+        ],
+        "title": "GeocoderHealth",
+        "description": "地理编码能力状态（FR-9.2）。"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LocationCandidate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "候选地名全称"
+          },
+          "bbox": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox",
+            "description": "[minx,miny,maxx,maxy]，CGCS2000 经纬度"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "bbox",
+          "confidence"
+        ],
+        "title": "LocationCandidate",
+        "description": "地理编码候选（歧义地名多候选交由用户选择，FR-9.2）。"
+      },
+      "NlLocation": {
+        "properties": {
+          "raw": {
+            "type": "string",
+            "title": "Raw",
+            "description": "原始地名文本"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox",
+            "description": "地理编码结果 bbox；失败时为 null（部分成功降级，FR-9.8）"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/LocationCandidate"
+            },
+            "type": "array",
+            "title": "Candidates",
+            "description": "歧义候选列表（FR-9.2）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "raw",
+          "confidence"
+        ],
+        "title": "NlLocation",
+        "description": "地理范围解析结果（FR-9.2）。"
+      },
+      "NlParseRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text",
+            "description": "用户自然语言输入，如“识别四川成都金牛区xx街道的建筑群”"
+          },
+          "element_catalog": {
+            "items": {
+              "$ref": "#/components/schemas/ElementCatalogItem"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Element Catalog",
+            "description": "当前可识别要素类别目录（必填，评审 D-02/J-06）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "element_catalog"
+        ],
+        "title": "NlParseRequest",
+        "description": "自然语言解析请求（设计 §4.5）。"
+      },
+      "NlParseResponse": {
+        "properties": {
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "feature_extraction",
+                  "feature_comparison",
+                  "temporal_analysis"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent",
+            "description": "意图类型；缺失且位置亦缺失时整体返回 LOCATION_UNRESOLVED（FR-9.8）"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NlLocation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "地理编码失败时为 null + uncertain_fields 含 location（部分成功降级，FR-9.8）"
+          },
+          "elements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Elements",
+            "description": "映射后的要素类别 ID 列表（FR-9.3）"
+          },
+          "periods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Periods",
+            "description": "期次标签列表（多期意图时）"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "整体解析置信度"
+          },
+          "need_confirm": {
+            "type": "boolean",
+            "title": "Need Confirm",
+            "description": "恒为 true（FR-9.4）",
+            "default": true
+          },
+          "unsupported": {
+            "items": {
+              "$ref": "#/components/schemas/UnsupportedItem"
+            },
+            "type": "array",
+            "title": "Unsupported",
+            "description": "无法映射的要素表述及原因（FR-9.3）"
+          },
+          "nlu_provider": {
+            "type": "string",
+            "enum": [
+              "llm",
+              "rule-based"
+            ],
+            "title": "Nlu Provider",
+            "description": "llm / rule-based（降级如实标记，FR-9.7）"
+          },
+          "uncertain_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertain Fields",
+            "description": "低置信度/失败字段标注（FR-9.4/9.8），无则 null"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confidence",
+          "nlu_provider"
+        ],
+        "title": "NlParseResponse",
+        "description": "自然语言解析响应（需求 7.4 + 评审 D-02）。\n\nneed_confirm 恒为 true（FR-9.4 强制用户确认）；\n未经确认不产生任何分析任务（验收标准第 9 条）。"
+      },
+      "NlpHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "nlu": {
+            "$ref": "#/components/schemas/NluHealth"
+          },
+          "geocoder": {
+            "$ref": "#/components/schemas/GeocoderHealth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "nlu",
+          "geocoder"
+        ],
+        "title": "NlpHealthResponse",
+        "description": "nlp-service /health（设计 §3.5）。"
+      },
+      "NluHealth": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "llm / rule-based（未配置 LLM 时常驻规则解析）"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "circuit": {
+            "type": "string",
+            "enum": [
+              "closed",
+              "half_open",
+              "open"
+            ],
+            "title": "Circuit",
+            "description": "进程内熔断器状态（FR-9.7）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "available",
+          "circuit"
+        ],
+        "title": "NluHealth",
+        "description": "NLU 能力状态（FR-9.7：熔断状态上报供 Java 监控告警）。"
+      },
+      "UnsupportedItem": {
+        "properties": {
+          "raw": {
+            "type": "string",
+            "title": "Raw",
+            "description": "用户输入中的要素表述（含修饰语），如“沿街建筑群”"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "无法映射原因"
+          }
+        },
+        "type": "object",
+        "required": [
+          "raw",
+          "reason"
+        ],
+        "title": "UnsupportedItem",
+        "description": "无法映射的要素描述（FR-9.3：明确告知并列出可识别类别）。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

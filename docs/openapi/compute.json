@@ -1,0 +1,447 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "compute-service",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/compute/diff": {
+      "post": {
+        "summary": "Diff",
+        "description": "双期差异逐像素计算（FR-7.2~7.5），支持懒调用（无状态）。",
+        "operationId": "diff_compute_diff_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/vectorize": {
+      "post": {
+        "summary": "Vectorize Api",
+        "description": "轮廓矢量化（FR-1.7/6.4/7.6），支持懒调用（V1.2 约定）。",
+        "operationId": "vectorize_api_compute_vectorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VectorizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "健康检查（轻量，无模型）。",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ComputeHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "cpu_cores": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Cpu Cores"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "cpu_cores"
+        ],
+        "title": "ComputeHealthResponse",
+        "description": "compute-service /health（轻量，无模型）。"
+      },
+      "DiffColors": {
+        "properties": {
+          "added": {
+            "type": "string",
+            "title": "Added",
+            "description": "新增（仅新图有）",
+            "default": "#00FF00"
+          },
+          "removed": {
+            "type": "string",
+            "title": "Removed",
+            "description": "减少（仅旧图有）",
+            "default": "#FF0000"
+          }
+        },
+        "type": "object",
+        "title": "DiffColors",
+        "description": "差异分色语义（FR-7.3，可配置；Java 自 capabilities defaults.diff_colors 下发）。"
+      },
+      "DiffRequest": {
+        "properties": {
+          "before_mask_b64": {
+            "type": "string",
+            "title": "Before Mask B64",
+            "description": "旧期要素二值蒙版 PNG base64"
+          },
+          "after_mask_b64": {
+            "type": "string",
+            "title": "After Mask B64",
+            "description": "新期要素二值蒙版 PNG base64"
+          },
+          "element": {
+            "type": "string",
+            "title": "Element",
+            "description": "要素类别 ID（单类别逐次调用）"
+          },
+          "min_area": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Area",
+            "description": "最小差异面积阈值（像素，FR-7.4）",
+            "default": 100
+          },
+          "colors": {
+            "$ref": "#/components/schemas/DiffColors"
+          },
+          "geo_transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geo Transform",
+            "description": "GDAL 六参数仿射变换（来自 infer 响应，Java 透传）；有值时输出 area_m2"
+          }
+        },
+        "type": "object",
+        "required": [
+          "before_mask_b64",
+          "after_mask_b64",
+          "element"
+        ],
+        "title": "DiffRequest",
+        "description": "差异计算请求（设计 §4.3）：输入为两期二值蒙版 base64 PNG，无需重新推理。\n\nJava 编排：同一要素两期分割 mask 在同一请求中给出，逐要素类别调用。"
+      },
+      "DiffResponse": {
+        "properties": {
+          "diff_mask_png_b64": {
+            "type": "string",
+            "title": "Diff Mask Png B64",
+            "description": "差异蒙版 PNG base64：added/removed 分色，不变区域透明（FR-7.3）"
+          },
+          "statistics": {
+            "$ref": "#/components/schemas/DiffStatistics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diff_mask_png_b64",
+          "statistics"
+        ],
+        "title": "DiffResponse",
+        "description": "差异计算响应（设计 §4.3）。"
+      },
+      "DiffStatistics": {
+        "properties": {
+          "added_px": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Added Px",
+            "description": "新增面积（像素）"
+          },
+          "removed_px": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Removed Px",
+            "description": "减少面积（像素）"
+          },
+          "net_change_px": {
+            "type": "integer",
+            "title": "Net Change Px",
+            "description": "净变化量（像素，after-before）"
+          },
+          "change_rate": {
+            "type": "number",
+            "title": "Change Rate",
+            "description": "变化率 (after-before)/before"
+          },
+          "added_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added M2",
+            "description": "新增地理面积（平方米）"
+          },
+          "removed_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed M2",
+            "description": "减少地理面积（平方米）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "added_px",
+          "removed_px",
+          "net_change_px",
+          "change_rate"
+        ],
+        "title": "DiffStatistics",
+        "description": "差异统计（FR-7.5，双单位口径 px + m²）。"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "RegionItem": {
+        "properties": {
+          "geojson": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Geojson",
+            "description": "GeoJSON 几何（CGCS2000 经纬度；无 geo_transform 时为像素坐标）"
+          },
+          "area_px": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Area Px",
+            "description": "面积（像素）"
+          },
+          "area_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area M2",
+            "description": "面积（平方米，pyproj Geod 椭球大地测量）"
+          },
+          "centroid": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Centroid",
+            "description": "中心点 [x, y]"
+          },
+          "bbox": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox",
+            "description": "[minx, miny, maxx, maxy]"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geojson",
+          "area_px",
+          "centroid",
+          "bbox"
+        ],
+        "title": "RegionItem",
+        "description": "单个矢量化区域（设计 §3.3.4；bbox 为 Java region 表冗余标量列数据源，需求 14.5）。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VectorizeRequest": {
+        "properties": {
+          "mask_b64": {
+            "type": "string",
+            "title": "Mask B64",
+            "description": "二值蒙版 PNG base64"
+          },
+          "min_area": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Area",
+            "description": "最小区域面积过滤阈值（像素）",
+            "default": 100.0
+          },
+          "geo_transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geo Transform",
+            "description": "GDAL 六参数仿射变换；有值时输出经纬度坐标与 area_m2，缺省时输出像素坐标"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mask_b64"
+        ],
+        "title": "VectorizeRequest",
+        "description": "矢量化请求（设计 §4.4）。"
+      },
+      "VectorizeResponse": {
+        "properties": {
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/RegionItem"
+            },
+            "type": "array",
+            "title": "Regions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "regions"
+        ],
+        "title": "VectorizeResponse",
+        "description": "矢量化响应（设计 §4.4）。差异任务新增/减少分开调用、分别矢量化（FR-7.6）。"
+      }
+    }
+  }
+}

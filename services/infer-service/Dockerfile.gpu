@@ -1,0 +1,38 @@
+# infer-service GPU 版镜像（设计 §7.1）：onnxruntime-gpu + pynvml
+# 运行需挂 NVIDIA Container Toolkit；GPU 探测由 /health 上报（FR-5.7）
+# 内网离线 pip 源构建：docker build -f Dockerfile.gpu --build-arg PIP_INDEX_URL=http://<内网制品库>/simple
+# 注：ubuntu22.04 默认 python3 为 3.10（不满足 >=3.11）且 ensurepip 被 Debian 禁用，
+#     须以 python3.11 -m venv 引导 pip（python3.11-venv 提供捆绑 pip wheel，P-028 排坑）
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ARG PIP_INDEX_URL
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# python3.11 虚拟环境（apt python3-pip 绑定 3.10，不可用）
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+COPY packages/cv-common /app/packages/cv-common
+COPY services/infer-service /app/services/infer-service
+
+RUN pip install --no-cache-dir --upgrade pip setuptools
+
+# GPU 变体：onnxruntime 与 onnxruntime-gpu 同 namespace 互斥——
+# 先装主依赖，再卸载 CPU 版、换装 GPU 版 + pynvml（P-028）
+RUN pip install --no-cache-dir \
+    /app/packages/cv-common \
+    /app/services/infer-service \
+    && pip uninstall -y onnxruntime \
+    && pip install --no-cache-dir "onnxruntime-gpu>=1.18" "pynvml>=11.5"
+
+EXPOSE 8001
+VOLUME ["/models"]
+
+CMD ["python", "-m", "uvicorn", "infer_service.main:app", "--host", "0.0.0.0", "--port", "8001"]

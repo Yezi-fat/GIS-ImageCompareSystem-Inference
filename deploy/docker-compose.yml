@@ -1,0 +1,56 @@
+# ============================================================================
+# Python 推理计算服务群 本次部署编排（2026-09-21）
+# ----------------------------------------------------------------------------
+# 使用方法（在本 deploy/ 目录内执行）：
+#   cd deploy
+#   docker compose up -d            # 启动
+#   docker compose ps               # 状态
+#   docker compose logs -f          # 日志
+#   docker compose down             # 停止
+#
+# 说明：
+# - 项目目录即本目录：env_file: .env 指向 deploy/.env；模型卷 ../models 指向
+#   仓库根 models/（yolo11 v1.0 真实模型 + change-detection v0.0-fake 伪模型）；
+# - 镜像使用本地已构建镜像（构建命令见《Python推理计算服务部署文档》§3）；
+# - 加入 Java 侧外部网络 mapchange_default 并注册别名（形态 A）。
+# ============================================================================
+services:
+  infer-service:
+    image: gis-imagecomparesystem-inference-infer-service:latest
+    container_name: python-infer-service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../models:/models:ro        # 仓库根 models/ → 容器 /models（只读）
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [infer-service]
+    restart: unless-stopped
+
+  compute-service:
+    image: gis-imagecomparesystem-inference-compute-service:latest
+    container_name: python-compute-service
+    ports:
+      - "8002:8002"
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [compute-service]
+    restart: unless-stopped
+
+  nlp-service:
+    image: gis-imagecomparesystem-inference-nlp-service:latest
+    container_name: python-nlp-service
+    ports:
+      - "8003:8003"
+    env_file: .env
+    networks:
+      mapchange:
+        aliases: [nlp-service]
+    restart: unless-stopped
+
+networks:
+  mapchange:
+    external: true
+    name: mapchange_default

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cv-common"
+version = "0.1.0"
+description = "影像变化检测 Python 服务群共享库：契约 schema（唯一事实源）、CGCS2000 坐标工具、影像编解码、统一错误模型、内部鉴权与结构化日志"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "fastapi>=0.110",
+    "numpy>=1.26",
+    "pyproj>=3.6",
+    "structlog>=24.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

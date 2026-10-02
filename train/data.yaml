@@ -1,0 +1,10 @@
+# YOLO11 影像地图要素检测数据集配置（类别顺序即契约，见 train/README.md §0）
+path: ./train/dataset        # 数据集根（mask_to_yolo.py 产物目录）
+train: images/train
+val: images/val
+
+names:
+  0: forest      # 森林
+  1: grassland   # 草地
+  2: snow        # 雪山覆盖
+  3: building    # 建筑

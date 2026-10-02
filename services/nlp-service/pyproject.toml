@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlp-service"
+version = "0.1.0"
+description = "NLP 服务：/nlp/parse；NLU（LLM/规则降级）、地理编码适配、能力上报（轻量，依赖外部服务，可整体裁剪）"
+requires-python = ">=3.11"
+dependencies = [
+    "cv-common",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic-settings>=2.2",
+    "httpx>=0.27",
+    "jieba>=0.42",
+]
+
+[project.optional-dependencies]
+# 注：设计中的 instructor 未采用——其依赖 OpenAI SDK 客户端对象，
+# 与 httpx 直调完整 URL（约束 #10）不兼容；结构化输出以
+# response_format=json_object + Pydantic 校验重试实现（P-021 口径）
+dev = [
+    "pytest>=8.0",
+    "respx>=0.22",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
