@@ -8,15 +8,24 @@
 # 「项目目录」解析，缺省为 compose 文件所在目录（deploy/），会找不到根目录 .env。
 #
 # 与仓库根目录 docker-compose.yml（开发联调版）的区别：
-#   - 不 build，直接使用已构建好的镜像（构建见部署文档 §3）；
+#   - 镜像可从源码直接重建（build 段指向仓库根；镜像已存在时 up 直接复用，
+#     强制重建用 up -d --build 或 compose build）；
 #   - 模型目录挂载宿主机 /data/models（只读），由运维按部署文档 §2 放置；
 #   - 含 restart: unless-stopped。
+#
+# 内网离线构建：PIP_INDEX_URL=http://<内网制品库>/simple docker compose \
+#   --project-directory . -f deploy/docker-compose.prod.yml build
 #
 # 前置条件：Java 侧 compose 已创建外部网络 mapchange_default
 #   （验证：docker network ls | grep mapchange_default）
 # ============================================================================
 services:
   infer-service:
+    build:
+      context: ..
+      dockerfile: services/infer-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}   # 内网离线 pip 源（不设则用默认源）
     image: gis-imagecomparesystem-inference-infer-service:latest
     container_name: python-infer-service
     ports:
@@ -32,6 +41,11 @@ services:
     restart: unless-stopped
 
   compute-service:
+    build:
+      context: ..
+      dockerfile: services/compute-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     image: gis-imagecomparesystem-inference-compute-service:latest
     container_name: python-compute-service
     ports:
@@ -43,6 +57,11 @@ services:
     restart: unless-stopped
 
   nlp-service:
+    build:
+      context: ..
+      dockerfile: services/nlp-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     image: gis-imagecomparesystem-inference-nlp-service:latest
     container_name: python-nlp-service
     ports:
@@ -62,8 +81,13 @@ networks:
 # 形态 B（独立宿主机/独立网络，Java 经 PYTHON_*_HOST/PORT 指向本机）：
 #   删除上方 networks 段（services 内的与文件底部的），保留 ports 映射即可。
 #
-# GPU 版：将 infer-service 替换为（镜像构建见部署文档 §3.2）：
+# GPU 版：将 infer-service 替换为（构建细节见部署文档 §3.2）：
 #   infer-service:
+#     build:
+#       context: ..
+#       dockerfile: services/infer-service/Dockerfile.gpu
+#       args:
+#         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
 #     image: map-change-infer:gpu
 #     container_name: python-infer-service
 #     ports: ["8001:8001"]

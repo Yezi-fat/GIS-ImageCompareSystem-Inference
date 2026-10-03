@@ -3,19 +3,29 @@
 # ----------------------------------------------------------------------------
 # 使用方法（在本 deploy/ 目录内执行）：
 #   cd deploy
-#   docker compose up -d            # 启动
-#   docker compose ps               # 状态
-#   docker compose logs -f          # 日志
-#   docker compose down             # 停止
+#   docker compose up -d            # 启动（镜像不存在时自动构建）
+#   docker compose up -d --build   # 强制重建镜像后启动
+#   docker compose build            # 仅构建镜像
+#   docker compose ps / logs -f / down
 #
 # 说明：
+# - build 段：context 指向仓库根（..），dockerfile 指向各服务 Dockerfile——
+#   镜像可从源码直接重建，不依赖"本地恰好已有同名镜像"（2026-10-03 修复：
+#   原仅 image 引用，镜像缺失时 compose 会去远端仓库拉取同名镜像而失败）；
+# - 内网离线构建：PIP_INDEX_URL=http://<内网制品库>/simple docker compose build；
+# - GPU 版：infer-service 的 dockerfile 改为 services/infer-service/Dockerfile.gpu，
+#   并按《部署文档》§9 补 deploy.resources GPU 预留段；
 # - 项目目录即本目录：env_file: .env 指向 deploy/.env；模型卷 ../models 指向
 #   仓库根 models/（yolo11 v1.0 真实模型 + change-detection v0.0-fake 伪模型）；
-# - 镜像使用本地已构建镜像（构建命令见《Python推理计算服务部署文档》§3）；
 # - 加入 Java 侧外部网络 mapchange_default 并注册别名（形态 A）。
 # ============================================================================
 services:
   infer-service:
+    build:
+      context: ..
+      dockerfile: services/infer-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}   # 内网离线 pip 源（不设则用默认源）
     image: gis-imagecomparesystem-inference-infer-service:latest
     container_name: python-infer-service
     ports:
@@ -29,6 +39,11 @@ services:
     restart: unless-stopped
 
   compute-service:
+    build:
+      context: ..
+      dockerfile: services/compute-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     image: gis-imagecomparesystem-inference-compute-service:latest
     container_name: python-compute-service
     ports:
@@ -40,6 +55,11 @@ services:
     restart: unless-stopped
 
   nlp-service:
+    build:
+      context: ..
+      dockerfile: services/nlp-service/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     image: gis-imagecomparesystem-inference-nlp-service:latest
     container_name: python-nlp-service
     ports:

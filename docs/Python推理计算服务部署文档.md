@@ -252,12 +252,15 @@ vi .env
 ## 5. 编排文件（docker compose）
 
 生产编排范例已独立为 **`deploy/docker-compose.prod.yml`**（形态 A：与 Java 同网络），
-与仓库根目录开发联调版 `docker-compose.yml` 的区别：不 build（直接用已构建镜像）、
+与仓库根目录开发联调版 `docker-compose.yml` 的区别：
 模型挂载 `/data/models:ro`、含 `restart: unless-stopped`。
+两者均含 build 段（2026-10-03 起）：镜像已存在时 `up` 直接复用，镜像缺失自动从源码构建，
+强制重建用 `docker compose --project-directory . -f deploy/docker-compose.prod.yml up -d --build`；
+内网离线构建前置 `PIP_INDEX_URL=http://<内网制品库>/simple` 环境变量即可（构建参数已接线）。
 
 - **形态 A**：直接使用，无需修改（前提是 Java 侧 `mapchange_default` 网络已存在）；
 - **形态 B**（独立宿主机）：删除文件底部与三个服务内的 `networks` 段，保留 `ports` 映射；Java 侧设置 `PYTHON_INFER_HOST=<本机 IP>` 等参数；
-- **GPU 版**：按文件底部注释块替换 infer-service 服务定义（镜像换 `map-change-infer:gpu`，加 `deploy.resources` 段，`SERVICE__DEFAULT_PROVIDER=local-gpu`）。
+- **GPU 版**：按文件底部注释块替换 infer-service 服务定义（dockerfile 换 `Dockerfile.gpu`，镜像换 `map-change-infer:gpu`，加 `deploy.resources` 段，`SERVICE__DEFAULT_PROVIDER=local-gpu`）。
 
 ---
 
