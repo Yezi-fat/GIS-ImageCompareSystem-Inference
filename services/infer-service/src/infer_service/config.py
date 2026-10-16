@@ -66,9 +66,10 @@ class SegmentationModelSettings(BaseModel):
     version: str = Field(default="v2.0", description="默认分割模型版本（目录名）")
     class_ids: list[int] | None = Field(
         default=None,
-        description="分割模型输出类别 ID 表（与 Java 要素目录 model_class_id 对齐，FR-6.2）；"
-                    "缺省（null）时从模型 ONNX 元数据 names 自动推导——检测模型（YOLO 系）"
-                    "类别序号直用、末位通道为背景；显式配置则以配置为准并做通道错配校验",
+        description="默认分割模型输出类别 ID 表（与 Java 要素目录 model_class_id 对齐，FR-6.2）；"
+                    "**仅对本配置 name/version 指定的默认模型生效**——层级路由或显式指定的其他模型"
+                    "一律从其 ONNX 元数据 names 推导（检测模型类别序号直用、末位通道为背景）；"
+                    "缺省（null）时默认模型同样自动推导",
     )
     # 检测模型（YOLO 系）解码参数（P-014）：仅对 [1, 4+C, anchors] 检测输出格式生效；
     # 分割概率图模型（含伪模型）不使用。class_mapping 约定 = 模型类别序号直用（末位通道保留为背景）

@@ -44,17 +44,20 @@ class ModelStore:
         model_name: str | None = None,
         model_version: str | None = None,
     ) -> list[int] | None:
-        """分割模型有效类别表（Q2-P2）：显式配置优先；缺省时从 ONNX names 自动推导。
+        """分割模型有效类别表（Q2-P2）：默认模型显式配置优先；其余从 ONNX names 推导。
 
-        推导规则（discovery.read_model_metadata）：检测模型（3 维输出）类别序号直用、
-        末位通道为背景 → [0..len(names)]；逐像素分割模型（4 维输出）→ [0..len(names)-1]；
-        模型未内嵌 names 或文件缺失 → None（不做模型侧类别约束，FR-6.6 仅校验映射表）。
+        显式配置 MODELS__SEGMENTATION__CLASS_IDS 仅对**默认分割模型**（配置的
+        name/version）生效——层级路由（V1.2）或显式指定的其他模型与该配置无关，
+        一律从其 ONNX 元数据 names 推导：检测模型（3 维输出）类别序号直用、
+        末位通道为背景 → [0..len(names)]；逐像素分割模型（4 维输出）→
+        [0..len(names)-1]；模型未内嵌 names 或文件缺失 → None（不做模型侧类别约束）。
         推导结果按 (name, version) 进程内缓存。
         """
-        configured = self._settings.models.segmentation.class_ids
-        if configured:
-            return list(configured)
         name, version = self.resolve_version(model_name, model_version, "segmentation")
+        default = self._settings.models.segmentation
+        configured = default.class_ids
+        if configured and (name, version) == (default.name, default.version):
+            return list(configured)
         key = (name, version)
         if key not in self._derived_class_ids:
             self._derived_class_ids[key] = self._derive_class_ids(name, version)

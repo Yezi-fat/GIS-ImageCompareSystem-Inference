@@ -144,3 +144,15 @@ def test_routing_config_defaults():
     assert routing.low_zoom_name == "sfrs"
     assert routing.low_zoom_class_mapping["forest"] == 1
     assert routing.low_zoom_class_mapping["snow"] == 8
+
+
+def test_explicit_class_ids_only_apply_to_default_model():
+    """回归（容器实测发现）：显式 CLASS_IDS 仅约束默认模型——
+    路由/显式指定的其他模型（sfrs）从其 ONNX names 推导，不受默认模型配置错配影响。"""
+    from infer_service.engines.model_store import ModelStore
+
+    settings = Settings()
+    settings.models.segmentation.class_ids = list(range(11))  # 默认模型的显式配置（如 EuroSAT 11 通道）
+    store = ModelStore(settings)
+    assert store.effective_class_ids() == list(range(11))                    # 默认模型：配置优先
+    assert store.effective_class_ids("sfrs", "v0.0-fake") == list(range(9))  # 其他模型：ONNX 推导
