@@ -21,13 +21,23 @@
 # ============================================================================
 services:
   infer-service:
+    # 本部署：GPU 形态（宿主机 RTX 4080 + nvidia-container-toolkit 就绪，2026-10-17）
+    # CPU 形态：dockerfile 改回 services/infer-service/Dockerfile、image 改为
+    # gis-imagecomparesystem-inference-infer-service:latest，并删除 deploy 段
     build:
       context: ..
-      dockerfile: services/infer-service/Dockerfile
+      dockerfile: services/infer-service/Dockerfile.gpu
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}   # 内网离线 pip 源（不设则用默认源）
-    image: gis-imagecomparesystem-inference-infer-service:latest
+    image: map-change-infer:gpu
     container_name: python-infer-service
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     ports:
       - "8001:8001"
     volumes:
