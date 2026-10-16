@@ -2,10 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.1 |
+| 文档版本 | V1.2 |
 | 编写日期 | 2026-09-12 |
 | 适用范围 | Python 推理计算服务群（infer-service / compute-service / nlp-service），**仅内网**，供 Java 业务服务群（analysis-service / result-service）调用 |
 | 依据 | 详细设计文档 V2.6、需求分析文档 V2.8、docs/openapi/ 快照；本文全部示例经运行中服务实测（伪模型 v0.0-fake 链路） |
+| V1.2 修订 | §1.1 新增 `tile_z` 与 `low_zoom_class_mapping` 请求字段——层级路由（工作任务十一）：z≤阈值路由 SegFormer-RS 低层级模型，z>阈值用默认 YOLO 模型 |
 | V1.1 修订 | §1.4 新增 `GET /infer/models` 模型发现接口（bug-2026-09-28 Q2/Q3）；§0.2 `X-Inference-Provider` 非法取值行为明确为 400 INVALID_INPUT（原静默兜底） |
 
 ## 0. 通用约定
@@ -50,17 +51,26 @@
 
 **功能说明**：对单期影像执行语义分割，识别指定要素类别（可多选）的空间覆盖范围。管线：预签名 URL 拉图（GeoTIFF 内嵌 CRS 校验并与 `geo_extent` 交叉校验，PNG/JPEG 按 `geo_extent` 线性推导 geo_transform）→ 256×256 重叠 32px 流式 Tile 推理 → 重叠区概率均值融合（无接缝）→ 类别提取 → 形态学去噪 + 小区域过滤 → 合成蒙版着色 + 各类独立蒙版 → 双单位面积统计。
 
+**层级路由（V1.2，工作任务十一）**：YOLO 检测模型在低层级瓦片（1~12 级，地面分辨率低）识别能力弱。请求携带 `tile_z` 且未显式指定 `model_name`/`model_version` 时：
+- `tile_z ≤ MODELS__ROUTING__ZOOM_THRESHOLD`（默认 12）→ 路由到**低层级模型**（SegFormer-RemoteSensing，Dynamic World 9 类逐像素分割）；
+- `tile_z > 阈值` → 默认模型（YOLO 系）；
+- 未带 `tile_z` 或显式指定模型 → 不路由（向后兼容，FR-3.5 显式指定优先级最高）。
+
+路由命中低层级模型时，类别映射改用 `low_zoom_class_mapping`（缺省用 infer L1 配置兜底），预处理按 SegFormer 口径归一化（ImageNet mean/std，L1 配置）。响应 `model_info` 如实反映实际执行模型。
+
 **请求参数**：
 
 | 参数 | 类型 | 必选 | 说明 |
 | --- | --- | --- | --- |
 | image_url | string | 是 | 影像预签名 URL（PNG/JPEG/TIFF/GeoTIFF） |
 | geo_extent | float[4] | 是 | `[minx,miny,maxx,maxy]` CGCS2000 经纬度；GeoTIFF 场景用于交叉校验，不一致返 GEO_EXTENT_MISMATCH |
+| tile_z | int | 否 | 地图瓦片层级 1~18（V1.2）：参与层级路由（见上）；缺省不路由 |
 | elements | string[] | 是 | 要素类别 ID 列表（如 `["forest","building"]`） |
-| class_mapping | object | 是 | 要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发） |
+| class_mapping | object | 是 | 要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）；路由命中低层级模型时不适用 |
+| low_zoom_class_mapping | object | 否 | 低层级模型的要素→类别映射（V1.2，路由命中时生效）；缺省用 infer L1 配置 `MODELS__ROUTING__LOW_ZOOM_CLASS_MAPPING` 兜底。Dynamic World 9 类：0=water 1=trees 2=grass 3=flooded_vegetation 4=crops 5=shrub_and_scrub 6=built 7=bare 8=snow_and_ice |
 | colors | object | 是 | 要素类别 ID → `#RRGGBB` 叠加颜色 |
 | min_area | int | 否 | 最小斑块面积（像素，默认 100） |
-| model_name / model_version | string | 否 | 缺省用 L1 配置默认版本（FR-3.5 切换链路） |
+| model_name / model_version | string | 否 | 缺省用 L1 配置默认版本（FR-3.5 切换链路）；**任一显式指定时不参与层级路由** |
 
 **响应参数**（200）：
 

@@ -17,6 +17,8 @@ os.environ.setdefault("AUTH_ENABLED", "false")
 os.environ.setdefault("MODELS__DIR", str(MODELS_DIR))
 os.environ.setdefault("MODELS__SEGMENTATION__VERSION", "v0.0-fake")
 os.environ.setdefault("MODELS__CHANGE_DETECTION__VERSION", "v0.0-fake")
+# 层级路由（工作任务十一）：低层级伪模型版本
+os.environ.setdefault("MODELS__ROUTING__LOW_ZOOM_VERSION", "v0.0-fake")
 
 # 伪模型缺失时自动生成（P-012 联调主线，不依赖真实模型交付）
 if not (MODELS_DIR / "landcover-seg" / "v0.0-fake" / "int8.onnx").is_file():

@@ -84,6 +84,62 @@ def _make_change_detection() -> onnx.ModelProto:
     return model
 
 
+def _make_sfrs() -> onnx.ModelProto:
+    """input[1,3,H,W]（0~1 归一化）→ prob[1,9,H,W]：SegFormer-RS（Dynamic World 9 类）伪模型。
+
+    层级路由（工作任务十一）测试用：确定性语义——纯蓝→water(0)、纯绿→trees(1)、
+    纯红→built(6)；各类别 logit 取通道线性组合，经 Softmax 归一。
+    内嵌 DW 类别名称表（class_ids 自动推导 → [0..8]）。
+    """
+    inp = helper.make_tensor_value_info("input", onnx.TensorProto.FLOAT, [1, 3, "H", "W"])
+    out = helper.make_tensor_value_info("logits", onnx.TensorProto.FLOAT, [1, 9, "H", "W"])
+
+    consts = {
+        "idx_r": np.array([0], dtype=np.int64),
+        "idx_g": np.array([1], dtype=np.int64),
+        "idx_b": np.array([2], dtype=np.int64),
+        "c255": np.array(255.0, dtype=np.float32),
+        "half": np.array(0.5, dtype=np.float32),
+        "c075": np.array(0.75, dtype=np.float32),
+    }
+    nodes = [
+        helper.make_node("Mul", ["input", "c255"], ["scaled"]),
+        helper.make_node("Gather", ["scaled", "idx_r"], ["r"], axis=1),
+        helper.make_node("Gather", ["scaled", "idx_g"], ["g"], axis=1),
+        helper.make_node("Gather", ["scaled", "idx_b"], ["b"], axis=1),
+        helper.make_node("ReduceMean", ["scaled"], ["mean"], axes=[1], keepdims=1),
+        helper.make_node("Add", ["r", "g"], ["r_plus_g"]),
+        helper.make_node("Mul", ["r_plus_g", "half"], ["grass"]),        # 2 grass=(R+G)/2
+        helper.make_node("Add", ["g", "b"], ["g_plus_b"]),
+        helper.make_node("Mul", ["g_plus_b", "half"], ["flooded"]),      # 3 flooded=(G+B)/2
+        helper.make_node("Add", ["r", "b"], ["r_plus_b"]),
+        helper.make_node("Mul", ["r_plus_b", "half"], ["crops"]),        # 4 crops=(R+B)/2
+        helper.make_node("Mul", ["r", "c075"], ["bare"]),                # 7 bare=0.75R
+        # 类别顺序 [0=water(B), 1=trees(G), 2=grass, 3=flooded, 4=crops,
+        #          5=shrub(mean), 6=built(R), 7=bare(0.75R), 8=snow(0.75G)]
+        helper.make_node("Mul", ["g", "c075"], ["snow"]),
+        helper.make_node(
+            "Concat",
+            ["b", "g", "grass", "flooded", "crops", "mean", "r", "bare", "snow"],
+            ["logits_raw"], axis=1,
+        ),
+        helper.make_node("Softmax", ["logits_raw"], ["logits"], axis=1),
+    ]
+    graph = helper.make_graph(
+        nodes, "fake-sfrs", [inp], [out],
+        initializer=[numpy_helper.from_array(v, k) for k, v in consts.items()],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    model.ir_version = 8
+    # Dynamic World 官方 9 类（与真实 sfrs 模型元数据一致）
+    names = {0: "water", 1: "trees", 2: "grass", 3: "flooded_vegetation", 4: "crops",
+             5: "shrub_and_scrub", 6: "built", 7: "bare", 8: "snow_and_ice"}
+    meta = model.metadata_props.add()
+    meta.key = "names"
+    meta.value = str(names)
+    return model
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="services/infer-service/models", help="模型根目录（{name}/{version}/ 组织）")
@@ -93,6 +149,7 @@ def main() -> None:
     specs = {
         ("landcover-seg", "v0.0-fake"): _make_segmentation(),
         ("change-detection", "v0.0-fake"): _make_change_detection(),
+        ("sfrs", "v0.0-fake"): _make_sfrs(),  # 层级路由低层级伪模型（工作任务十一）
     }
     for (name, version), model in specs.items():
         onnx.checker.check_model(model)

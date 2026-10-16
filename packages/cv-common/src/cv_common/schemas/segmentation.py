@@ -16,10 +16,27 @@ class SegmentationRequest(BaseModel):
     """
 
     image_url: str = Field(description="Java 签发的对象存储内网预签名 URL（评审 P-03）")
-    model_name: str | None = Field(default=None, description="缺省用默认版本（FR-3.5 切换链路，评审 P-02）")
-    model_version: str | None = Field(default=None, description="缺省用默认版本")
+    model_name: str | None = Field(
+        default=None,
+        description="缺省用默认版本（FR-3.5 切换链路，评审 P-02）；"
+                    "name 或 version 任一显式指定时不参与层级路由（V1.2）",
+    )
+    model_version: str | None = Field(default=None, description="缺省用默认版本；显式指定时不参与层级路由")
+    tile_z: int | None = Field(
+        default=None, ge=1, le=18,
+        description="地图瓦片层级（V1.2 模型路由）：提供时 z≤阈值路由到低层级分割模型"
+                    "（SegFormer-RS），z>阈值用默认模型（YOLO）；缺省不路由、恒用默认模型",
+    )
     elements: list[str] = Field(min_length=1, description="要素类别 ID 列表（多选，FR-6.1）")
-    class_mapping: dict[str, int] = Field(description="要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）")
+    class_mapping: dict[str, int] = Field(
+        description="要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）；"
+                    "路由命中低层级模型时改用 low_zoom_class_mapping（V1.2）",
+    )
+    low_zoom_class_mapping: dict[str, int] | None = Field(
+        default=None,
+        description="低层级模型（路由命中时）的要素→类别映射（V1.2）；"
+                    "缺省用 infer-service L1 配置 MODELS__ROUTING__LOW_ZOOM_CLASS_MAPPING 兜底",
+    )
     colors: dict[str, str] = Field(description="要素类别 ID → 叠加颜色（#RRGGBB，Java 自 element_catalog 下发）")
     min_area: int = Field(default=100, ge=0, description="最小斑块面积（像素，FR-1.6/6.5）")
     geo_extent: list[float] = Field(

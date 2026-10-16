@@ -83,10 +83,40 @@ class ChangeDetectionModelSettings(BaseModel):
     version: str = Field(default="v1.2", description="默认变化检测模型版本（目录名）")
 
 
+class ModelRoutingSettings(BaseModel):
+    """层级路由（工作任务十一）：低分辨率瓦片层级（z≤阈值）路由到 SegFormer-RS 模型。
+
+    YOLO 检测模型在低层级（1~12 级，地面分辨率低）识别能力弱；
+    低层级改用 Dynamic World 数据集训练的 SegFormer-RemoteSensing 逐像素分割模型。
+    请求显式指定 model_name 时不参与路由（FR-3.5 优先级最高）。
+    """
+
+    zoom_threshold: int = Field(
+        default=12, ge=1, le=17,
+        description="层级路由阈值：请求带 tile_z 且 z ≤ 阈值 → 低层级模型；z > 阈值 → 默认模型",
+    )
+    low_zoom_name: str = Field(default="sfrs", description="低层级模型名（目录名）")
+    low_zoom_version: str = Field(default="v1.0", description="低层级模型版本（目录名）")
+    low_zoom_class_mapping: dict[str, int] = Field(
+        default_factory=lambda: {"forest": 1, "grassland": 2, "building": 6, "snow": 8},
+        description="低层级模型的要素→类别兜底映射（请求未下发 low_zoom_class_mapping 时使用）；"
+                    "默认按 Dynamic World 9 类：1=trees 2=grass 6=built 8=snow_and_ice",
+    )
+    low_zoom_normalize_mean: list[float] = Field(
+        default=[0.485, 0.456, 0.406],
+        description="低层级模型预处理均值（SegFormer/HF 惯例 ImageNet 均值；长度 3，RGB 序）",
+    )
+    low_zoom_normalize_std: list[float] = Field(
+        default=[0.229, 0.224, 0.225],
+        description="低层级模型预处理标准差（ImageNet 标准差；长度 3，RGB 序）",
+    )
+
+
 class ModelsSettings(BaseModel):
     dir: str = Field(default="/models", description="模型文件挂载点（容器 volume），按 {name}/{version}/ 组织")
     segmentation: SegmentationModelSettings = SegmentationModelSettings()
     change_detection: ChangeDetectionModelSettings = ChangeDetectionModelSettings()
+    routing: ModelRoutingSettings = ModelRoutingSettings()
 
 
 class TilingSettings(BaseModel):
