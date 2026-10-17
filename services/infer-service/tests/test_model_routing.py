@@ -112,7 +112,7 @@ def test_low_zoom_mapping_missing_element():
                  colors={"snow": "#F0F8FF"}, low_zoom_class_mapping={"forest": 1})
     assert resp.status_code == 400
     assert resp.json()["code"] == "UNSUPPORTED_ELEMENT"
-    assert "low_zoom_class_mapping" in resp.json()["message"]
+    assert "snow" in resp.json()["message"]
 
 
 # ---------- 预处理归一化 ----------

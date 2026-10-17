@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header
 
 from cv_common.schemas.change import ChangeDetectRequest, ChangeMaskResponse
+from cv_common.schemas.elements import ElementMappingResponse
 from cv_common.schemas.models import ModelsResponse
 from cv_common.schemas.segmentation import SegmentationRequest, SegmentationResponse
 
@@ -45,3 +46,12 @@ def list_models() -> ModelsResponse:
     类别表（ONNX 元数据 names）、加载状态与默认版本——供 Java 模型管理页
     展示/对账与 element_catalog 映射校验。"""
     return discovery.scan_models(settings, registry.model_store())
+
+
+@router.get("/infer/elements", response_model=ElementMappingResponse)
+def list_elements() -> ElementMappingResponse:
+    """统一要素目录（工作任务十二，V1.3）：DW 9 类基准的跨模型代号映射
+    （L1 配置 ELEMENTS__MAPPING），供 Java element_catalog 与前端选择器同步。"""
+    return ElementMappingResponse(
+        elements=[item.model_dump() for item in settings.elements.mapping]
+    )

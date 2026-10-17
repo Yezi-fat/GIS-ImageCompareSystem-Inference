@@ -2,10 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.2 |
+| 文档版本 | V1.3 |
 | 编写日期 | 2026-09-12 |
 | 适用范围 | Python 推理计算服务群（infer-service / compute-service / nlp-service），**仅内网**，供 Java 业务服务群（analysis-service / result-service）调用 |
 | 依据 | 详细设计文档 V2.6、需求分析文档 V2.8、docs/openapi/ 快照；本文全部示例经运行中服务实测（伪模型 v0.0-fake 链路） |
+| V1.3 修订 | §1.1 `class_mapping` 改为可选——省略时按统一要素映射表（ELEMENTS__MAPPING，DW 9 类基准，支持一对多代号）解析；§1.5 新增 `GET /infer/elements` 统一要素目录（工作任务十二） |
 | V1.2 修订 | §1.1 新增 `tile_z` 与 `low_zoom_class_mapping` 请求字段——层级路由（工作任务十一）：z≤阈值路由 SegFormer-RS 低层级模型，z>阈值用默认 YOLO 模型 |
 | V1.1 修订 | §1.4 新增 `GET /infer/models` 模型发现接口（bug-2026-09-28 Q2/Q3）；§0.2 `X-Inference-Provider` 非法取值行为明确为 400 INVALID_INPUT（原静默兜底） |
 
@@ -66,8 +67,8 @@
 | geo_extent | float[4] | 是 | `[minx,miny,maxx,maxy]` CGCS2000 经纬度；GeoTIFF 场景用于交叉校验，不一致返 GEO_EXTENT_MISMATCH |
 | tile_z | int | 否 | 地图瓦片层级 1~18（V1.2）：参与层级路由（见上）；缺省不路由 |
 | elements | string[] | 是 | 要素类别 ID 列表（如 `["forest","building"]`） |
-| class_mapping | object | 是 | 要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）；路由命中低层级模型时不适用 |
-| low_zoom_class_mapping | object | 否 | 低层级模型的要素→类别映射（V1.2，路由命中时生效）；缺省用 infer L1 配置 `MODELS__ROUTING__LOW_ZOOM_CLASS_MAPPING` 兜底。Dynamic World 9 类：0=water 1=trees 2=grass 3=flooded_vegetation 4=crops 5=shrub_and_scrub 6=built 7=bare 8=snow_and_ice |
+| class_mapping | object | 否（V1.3 起） | 要素类别 ID → 模型输出类别 ID。**省略时按统一要素映射表**（ELEMENTS__MAPPING，Dynamic World 9 类基准）按实际路由模型解析代号（支持一对多，如 草地=HerbaceousVegetation+Pasture）——推荐新口径，前端一套要素双模型自动适配；携带时为兼容旧口径（低层级路由改用 low_zoom_class_mapping） |
+| low_zoom_class_mapping | object | 否 | 低层级模型的要素→类别映射（V1.2，仅在携带 class_mapping 的旧口径下生效）；缺省用 infer L1 配置兜底。Dynamic World 9 类：0=water 1=trees 2=grass 3=flooded_vegetation 4=crops 5=shrub_and_scrub 6=built 7=bare 8=snow_and_ice |
 | colors | object | 是 | 要素类别 ID → `#RRGGBB` 叠加颜色 |
 | min_area | int | 否 | 最小斑块面积（像素，默认 100） |
 | model_name / model_version | string | 否 | 缺省用 L1 配置默认版本（FR-3.5 切换链路）；**任一显式指定时不参与层级路由** |
@@ -253,6 +254,38 @@ curl -X POST http://infer-service:8001/infer/change-detection \
        "class_count": 11, "loaded": false, "default_for": []}]}
   ]
 }
+```
+
+---
+
+### 1.5 统一要素目录（V1.3 新增）
+
+| 项目 | 内容 |
+| --- | --- |
+| 方法与路径 | `GET /infer/elements` |
+| 对应事项 | 工作任务十二（双模型统一要素口径，前端只展示一套要素） |
+
+**功能说明**：返回统一要素目录（以 Dynamic World 9 类为基准）及跨模型代号映射——每项含统一要素 ID/显示名、各模型的输出类别代号（支持一对多）与类别名称。数据源为 infer L1 配置 `ELEMENTS__MAPPING`（内置 DW↔EuroSAT 默认对照表）。供 Java element_catalog 与前端选择器同步；自定义模型接入 = 配置中增配该模型名条目。
+
+**响应参数**（200）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| elements | array | 统一要素列表：`{element, name, models}` |
+| elements[].models.{模型名}.codes | int[] | 该模型的输出类别代号（空数组 = 该模型不支持此要素） |
+| elements[].models.{模型名}.names | string[] | 代号对应的模型类别名称 |
+
+**实测响应**（节选）：
+
+```json
+{"elements": [
+  {"element": "trees", "name": "森林",
+   "models": {"sfrs": {"codes": [1], "names": ["trees"]},
+              "landcover-yolo-v11": {"codes": [1], "names": ["Forest"]}}},
+  {"element": "snow_and_ice", "name": "冰雪覆盖",
+   "models": {"sfrs": {"codes": [8], "names": ["snow_and_ice"]},
+              "landcover-yolo-v11": {"codes": [], "names": []}}}
+]}
 ```
 
 ---

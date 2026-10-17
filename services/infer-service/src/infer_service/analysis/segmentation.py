@@ -1,11 +1,14 @@
 """要素识别编排（设计 §3.3.1，FR-6，P-012 伪模型跑通 / P-014 真实模型）。
 
 run_segmentation(req)
-  ⓪ 层级路由（V1.2，工作任务十一）：请求带 tile_z 且未显式指定 model_name 时，
+  ⓪ 层级路由（V1.2，工作任务十一）：请求带 tile_z 且未显式指定模型时，
      z ≤ 阈值路由到低层级模型（SegFormer-RS，低分辨率瓦片层级），
-     z > 阈值用默认模型（YOLO 系）；显式 model_name 恒优先（FR-3.5）
+     z > 阈值用默认模型（YOLO 系）；显式 model_name/model_version 恒优先（FR-3.5）
+     类别映射解析（V1.3，工作任务十二）：请求省略 class_mapping 时用统一要素映射表
+     （ELEMENTS__MAPPING，DW 9 类基准）按实际执行模型解析代号（支持一对多）；
+     携带时为兼容旧口径（默认模型 class_mapping / 低层级 low_zoom_class_mapping）
   ① loader 读图 → ② tiler 切分 → ③ engine.segment 逐批推理 → ④ 融合拼接
-  ⑤ 按 class_mapping 提取选定类别的二值蒙版
+  ⑤ 按生效映射提取选定要素的二值蒙版（np.isin 一对多）
      （elements 超模型类别 → UnsupportedElementError，FR-6.6）
   ⑥ postprocess → ⑦ colorize（合成 + 独立蒙版）
   ⑧ 统计：各类 area_px / ratio / patch_count（FR-6.5）；
@@ -39,46 +42,68 @@ logger = structlog.get_logger(__name__)
 
 
 class _Route:
-    """层级路由结果（V1.2）：目标模型 + 生效类别映射 + 预处理归一化参数。"""
+    """层级路由结果（V1.2）：目标模型 + 预处理归一化参数。"""
 
     def __init__(
         self,
         model_name: str | None,
         model_version: str | None,
-        class_mapping: dict[str, int],
         normalize_mean: list[float] | None,
         normalize_std: list[float] | None,
         routed_by: str,
     ):
         self.model_name = model_name
         self.model_version = model_version
-        self.class_mapping = class_mapping
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
         self.routed_by = routed_by  # explicit / low-zoom / default
 
 
 def _route_model(req: SegmentationRequest) -> _Route:
-    """层级路由（工作任务十一）：显式 model_name > tile_z ≤ 阈值 → 低层级模型 > 默认。
+    """层级路由（工作任务十一）：显式 model_name/version > tile_z ≤ 阈值 → 低层级模型 > 默认。
 
     - 显式指定 model_name 或 model_version：不参与路由（FR-3.5 管理优先级最高）；
-    - tile_z ≤ MODELS__ROUTING__ZOOM_THRESHOLD：低层级模型（SegFormer-RS），
-      类别映射取请求 low_zoom_class_mapping，缺省用 L1 配置兜底；
+    - tile_z ≤ MODELS__ROUTING__ZOOM_THRESHOLD：低层级模型（SegFormer-RS）；
     - 其余（z > 阈值或未带 tile_z）：默认模型（YOLO 系），不路由。
     """
     routing = settings.models.routing
     if req.model_name or req.model_version:
-        return _Route(req.model_name, req.model_version, req.class_mapping, None, None, "explicit")
+        return _Route(req.model_name, req.model_version, None, None, "explicit")
     if req.tile_z is not None and req.tile_z <= routing.zoom_threshold:
         return _Route(
             routing.low_zoom_name,
             routing.low_zoom_version,
-            req.low_zoom_class_mapping or routing.low_zoom_class_mapping,
             routing.low_zoom_normalize_mean,
             routing.low_zoom_normalize_std,
             "low-zoom",
         )
-    return _Route(None, None, req.class_mapping, None, None, "default")
+    return _Route(None, None, None, None, "default")
+
+
+def _resolve_effective_mapping(
+    req: SegmentationRequest, route: _Route, actual_model_name: str
+) -> dict[str, list[int]]:
+    """解析生效类别映射（要素 → 模型输出类别代号列表）。
+
+    优先级（工作任务十二，V1.3）：
+    1. 请求携带 class_mapping（兼容旧口径）：默认/显式模型用 class_mapping；
+       低层级路由用 low_zoom_class_mapping，缺省用 L1 配置兜底；
+    2. 请求省略 class_mapping（推荐新口径）：统一要素映射表（ELEMENTS__MAPPING，
+       DW 9 类基准）按实际执行模型名解析代号——前端一套要素、双模型自动适配。
+    """
+    if req.class_mapping is not None:
+        if route.routed_by == "low-zoom":
+            legacy = req.low_zoom_class_mapping or settings.models.routing.low_zoom_class_mapping
+        else:
+            legacy = req.class_mapping
+        return {k: [v] for k, v in legacy.items()}
+
+    unified: dict[str, list[int]] = {}
+    for item in settings.elements.mapping:
+        ref = item.models.get(actual_model_name)
+        if ref and ref.codes:
+            unified[item.element] = list(ref.codes)
+    return unified
 
 
 def run_segmentation(req: SegmentationRequest, provider_hint: str | None = None) -> SegmentationResponse:
@@ -88,7 +113,8 @@ def run_segmentation(req: SegmentationRequest, provider_hint: str | None = None)
     route = _route_model(req)
     engine = registry.get_engine(provider_hint)
     info = engine.info_for("segmentation", route.model_name, route.model_version)  # type: ignore[attr-defined]
-    _validate_elements(req, route, info.class_ids)
+    mapping = _resolve_effective_mapping(req, route, info.name)
+    _validate_elements(req, mapping, info.class_ids)
 
     # ① 读图（geo_transform：GeoTIFF 内嵌优先，PNG 由 geo_extent 推导，评审 D-01）
     image, geo_transform = loader.load_image(req.image_url, req.geo_extent)
@@ -104,7 +130,8 @@ def run_segmentation(req: SegmentationRequest, provider_hint: str | None = None)
         )
 
     # ②③④ 流式切分 → 推理 → 均值融合（设计 §5：不同时持有全部 Tile；信号量限流 P-018）
-    channels = (max(info.class_ids) + 1) if info.class_ids else (max(route.class_mapping.values()) + 1)
+    all_codes = [c for codes in mapping.values() for c in codes]
+    channels = (max(info.class_ids) + 1) if info.class_ids else (max(all_codes) + 1)
     canvas, count = tiler.alloc_canvas(height, width, channels)
     tile_count = 0
     semaphore = concurrency.get_inference_semaphore(
@@ -122,10 +149,10 @@ def run_segmentation(req: SegmentationRequest, provider_hint: str | None = None)
     probs = tiler.finalize_canvas(canvas, count)
     label_map = probs.argmax(axis=0)  # [H,W] 类别 ID
 
-    # ⑤⑥⑦ 按生效映射提取 → 后处理 → 着色
+    # ⑤⑥⑦ 按生效映射提取（一对多：np.isin，工作任务十二）→ 后处理 → 着色
     per_class_masks: dict[str, np.ndarray] = {}
     for element in req.elements:
-        mask = (label_map == route.class_mapping[element]).astype(np.uint8)
+        mask = np.isin(label_map, mapping[element]).astype(np.uint8)
         per_class_masks[element] = postprocess.postprocess_mask(mask, req.min_area)
     combined = colorize.colorize_combined(per_class_masks, req.colors)
 
@@ -160,19 +187,19 @@ def run_segmentation(req: SegmentationRequest, provider_hint: str | None = None)
 
 
 def _validate_elements(
-    req: SegmentationRequest, route: _Route, class_ids: list[int] | None
+    req: SegmentationRequest, mapping: dict[str, list[int]], class_ids: list[int] | None
 ) -> None:
-    """FR-6.6：选定类别超模型可识别范围时返回明确错误，不静默忽略。"""
-    unknown = [e for e in req.elements if e not in route.class_mapping]
+    """FR-6.6：选定要素超出生效映射/模型可识别范围时返回明确错误，不静默忽略。"""
+    unknown = [e for e in req.elements if e not in mapping]
     if unknown:
-        mapping_desc = (
-            "low_zoom_class_mapping（低层级路由）" if route.routed_by == "low-zoom" else "class_mapping"
-        )
         raise UnsupportedElementError(
-            f"要素类别 {unknown} 不在{mapping_desc}中（可识别：{sorted(route.class_mapping)}）"
+            f"要素类别 {unknown} 在当前模型的映射中不可识别（可识别：{sorted(mapping)}）"
         )
     if class_ids is not None:
-        out_of_model = [e for e in req.elements if route.class_mapping[e] not in class_ids]
+        out_of_model = [
+            e for e in req.elements
+            if any(code not in class_ids for code in mapping[e])
+        ]
         if out_of_model:
             raise UnsupportedElementError(
                 f"要素类别 {out_of_model} 超出模型输出类别 {class_ids}（FR-6.6）"

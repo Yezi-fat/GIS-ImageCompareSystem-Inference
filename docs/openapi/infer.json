@@ -138,6 +138,25 @@
         }
       }
     },
+    "/infer/elements": {
+      "get": {
+        "summary": "List Elements",
+        "description": "统一要素目录（工作任务十二，V1.3）：DW 9 类基准的跨模型代号映射\n（L1 配置 ELEMENTS__MAPPING），供 Java element_catalog 与前端选择器同步。",
+        "operationId": "list_elements_infer_elements_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElementMappingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",
@@ -391,6 +410,23 @@
         "title": "ClassStatistics",
         "description": "单类要素统计（FR-6.5，双单位口径：area_px + area_m2，需求 V1.6）。"
       },
+      "ElementMappingResponse": {
+        "properties": {
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/UnifiedElementItem"
+            },
+            "type": "array",
+            "title": "Elements"
+          }
+        },
+        "type": "object",
+        "required": [
+          "elements"
+        ],
+        "title": "ElementMappingResponse",
+        "description": "GET /infer/elements 响应：统一要素目录 + 跨模型代号映射。"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -475,6 +511,32 @@
         ],
         "title": "InferModelsHealth",
         "description": "infer-service 两类模型就绪状态。"
+      },
+      "ModelClassRefSchema": {
+        "properties": {
+          "codes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Codes",
+            "description": "模型输出类别代号列表（一对多支持；空 = 该模型不支持此要素）"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Names",
+            "description": "代号对应的模型类别名称"
+          }
+        },
+        "type": "object",
+        "required": [
+          "codes"
+        ],
+        "title": "ModelClassRefSchema",
+        "description": "某模型对某统一要素的识别能力（代号 + 名称）。"
       },
       "ModelEntry": {
         "properties": {
@@ -745,12 +807,19 @@
             "description": "要素类别 ID 列表（多选，FR-6.1）"
           },
           "class_mapping": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Class Mapping",
-            "description": "要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）；路由命中低层级模型时改用 low_zoom_class_mapping（V1.2）"
+            "description": "要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）。**V1.3 起可省略**：省略时由 infer-service 统一要素映射表（ELEMENTS__MAPPING，DW 9 类基准）按实际路由模型解析代号——前端一套要素、双模型自动适配（工作任务十二）；携带时为兼容旧口径：默认模型用本字段，低层级路由用 low_zoom_class_mapping"
           },
           "low_zoom_class_mapping": {
             "anyOf": [
@@ -797,7 +866,6 @@
         "required": [
           "image_url",
           "elements",
-          "class_mapping",
           "colors",
           "geo_extent"
         ],
@@ -871,6 +939,36 @@
         ],
         "title": "SegmentationResponse",
         "description": "要素识别响应（设计 §4.1）。"
+      },
+      "UnifiedElementItem": {
+        "properties": {
+          "element": {
+            "type": "string",
+            "title": "Element",
+            "description": "统一要素 ID（业务/前端唯一口径）"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "统一要素显示名"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelClassRefSchema"
+            },
+            "type": "object",
+            "title": "Models",
+            "description": "模型名 → 代号映射"
+          }
+        },
+        "type": "object",
+        "required": [
+          "element",
+          "name",
+          "models"
+        ],
+        "title": "UnifiedElementItem",
+        "description": "统一要素条目。"
       },
       "ValidationError": {
         "properties": {

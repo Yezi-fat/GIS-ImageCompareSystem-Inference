@@ -113,6 +113,75 @@ class ModelRoutingSettings(BaseModel):
     )
 
 
+class ModelClassRef(BaseModel):
+    """某模型对某统一要素的识别能力：输出类别代号列表 + 对应类别名称（工作任务十二）。"""
+
+    codes: list[int] = Field(description="模型输出类别代号列表（支持一对多，如 草地=HerbaceousVegetation+Pasture）")
+    names: list[str] = Field(default_factory=list, description="代号对应的模型类别名称（与 ONNX names 对应，便于人读）")
+
+
+class UnifiedElement(BaseModel):
+    """统一要素（以 Dynamic World 9 类为基准）：跨模型的代号映射关系（工作任务十二）。"""
+
+    element: str = Field(description="统一要素 ID（前端/业务侧唯一口径）")
+    name: str = Field(description="统一要素显示名")
+    models: dict[str, ModelClassRef] = Field(
+        description="模型名 → 代号映射；某模型缺失或 codes 为空 = 该模型不支持此要素"
+    )
+
+
+class ElementsSettings(BaseModel):
+    """统一要素映射表（工作任务十二）：前端只展示一套要素，Python 按路由结果翻译为
+    实际执行模型的输出类别代号。以 Dynamic World 9 类为基准（更贴合一般分析使用）。
+
+    L1 配置（ELEMENTS__MAPPING，JSON 注入），模型更换时改配置即可，无需改代码——
+    自定义模型接入 = 在表内为其模型名增配 codes/names。
+    """
+
+    mapping: list[UnifiedElement] = Field(
+        default_factory=lambda: [
+            # Dynamic World 9 类（sfrs）↔ EuroSAT 10 类（landcover-yolo-v11）
+            UnifiedElement(element="water", name="水体", models={
+                "sfrs": ModelClassRef(codes=[0], names=["water"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[8, 9], names=["River", "SeaLake"]),
+            }),
+            UnifiedElement(element="trees", name="森林", models={
+                "sfrs": ModelClassRef(codes=[1], names=["trees"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[1], names=["Forest"]),
+            }),
+            UnifiedElement(element="grass", name="草地", models={
+                "sfrs": ModelClassRef(codes=[2], names=["grass"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[2, 5], names=["HerbaceousVegetation", "Pasture"]),
+            }),
+            UnifiedElement(element="flooded_vegetation", name="淹水植被", models={
+                "sfrs": ModelClassRef(codes=[3], names=["flooded_vegetation"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[], names=[]),
+            }),
+            UnifiedElement(element="crops", name="耕地", models={
+                "sfrs": ModelClassRef(codes=[4], names=["crops"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[0, 6], names=["AnnualCrop", "PermanentCrop"]),
+            }),
+            UnifiedElement(element="shrub_and_scrub", name="灌丛", models={
+                "sfrs": ModelClassRef(codes=[5], names=["shrub_and_scrub"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[], names=[]),
+            }),
+            UnifiedElement(element="built", name="建筑", models={
+                "sfrs": ModelClassRef(codes=[6], names=["built"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[4, 7], names=["Industrial", "Residential"]),
+            }),
+            UnifiedElement(element="bare", name="裸地", models={
+                "sfrs": ModelClassRef(codes=[7], names=["bare"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[], names=[]),
+            }),
+            UnifiedElement(element="snow_and_ice", name="冰雪覆盖", models={
+                "sfrs": ModelClassRef(codes=[8], names=["snow_and_ice"]),
+                "landcover-yolo-v11": ModelClassRef(codes=[], names=[]),
+            }),
+        ],
+        description="统一要素映射表（DW 9 类基准）；ELEMENTS__MAPPING 以 JSON 整体覆盖",
+    )
+
+
 class ModelsSettings(BaseModel):
     dir: str = Field(default="/models", description="模型文件挂载点（容器 volume），按 {name}/{version}/ 组织")
     segmentation: SegmentationModelSettings = SegmentationModelSettings()
@@ -163,6 +232,7 @@ class Settings(BaseSettings):
 
     service: ServiceSettings = ServiceSettings()
     models: ModelsSettings = ModelsSettings()
+    elements: ElementsSettings = ElementsSettings()
     tiling: TilingSettings = TilingSettings()
     concurrency: ConcurrencySettings = ConcurrencySettings()
     remote: RemoteSettings = RemoteSettings()

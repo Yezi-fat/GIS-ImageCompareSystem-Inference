@@ -28,9 +28,12 @@ class SegmentationRequest(BaseModel):
                     "（SegFormer-RS），z>阈值用默认模型（YOLO）；缺省不路由、恒用默认模型",
     )
     elements: list[str] = Field(min_length=1, description="要素类别 ID 列表（多选，FR-6.1）")
-    class_mapping: dict[str, int] = Field(
-        description="要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）；"
-                    "路由命中低层级模型时改用 low_zoom_class_mapping（V1.2）",
+    class_mapping: dict[str, int] | None = Field(
+        default=None,
+        description="要素类别 ID → 模型输出类别 ID（Java 自 element_catalog 下发）。"
+                    "**V1.3 起可省略**：省略时由 infer-service 统一要素映射表（ELEMENTS__MAPPING，"
+                    "DW 9 类基准）按实际路由模型解析代号——前端一套要素、双模型自动适配（工作任务十二）；"
+                    "携带时为兼容旧口径：默认模型用本字段，低层级路由用 low_zoom_class_mapping",
     )
     low_zoom_class_mapping: dict[str, int] | None = Field(
         default=None,
